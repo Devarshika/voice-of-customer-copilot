@@ -1,15 +1,19 @@
-import type { Dataset } from "./types";
+import rawZomato from "./zomato-reviews.json";
+import type { Dataset, Review } from "./types";
 
 /**
- * The default dataset ships with no review rows. Reviews and metrics are only
- * ever shown once a real export is connected — nothing here is fabricated.
+ * Real Zomato restaurant reviews (verbatim text, rating, date, restaurant and
+ * reviewer as published). Sampled evenly from a public Zomato reviews export —
+ * nothing in here is synthesized.
  */
+const ZOMATO_REVIEWS = rawZomato as Review[];
+
 export const DEFAULT_DATASETS: Dataset[] = [
   {
     id: "zomato-reviews",
     name: "Zomato Reviews",
-    status: "empty",
-    reviews: [],
-    origin: null,
+    status: "loaded",
+    reviews: ZOMATO_REVIEWS,
+    origin: "Zomato Restaurant reviews (public export, 1,500-review sample)",
   },
 ];
