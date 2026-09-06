@@ -9,7 +9,7 @@ export type Review = {
   /** e.g. "Zomato", "App Store" — null when the source did not provide it. */
   source: string | null;
   /** Any extra metadata columns present in the uploaded file. */
-  extra?: Record<string, string>;
+  extra?: Record<string, string> | undefined;
 };
 
 export type Dataset = {
