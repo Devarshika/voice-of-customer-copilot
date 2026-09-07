@@ -16,7 +16,7 @@ export type Dataset = {
   id: string;
   name: string;
   /** "empty" = structure ready, no review data connected yet. */
-  status: "empty" | "loaded";
+  status: "empty" | "loading" | "loaded";
   reviews: Review[];
   /** Where the rows came from, shown in the UI. */
   origin: string | null;

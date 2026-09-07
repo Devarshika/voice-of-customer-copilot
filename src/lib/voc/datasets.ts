@@ -1,19 +1,26 @@
-import rawZomato from "./zomato-reviews.json";
+import csvAsset from "@/assets/zomato_reviews_demo_100k.csv.asset.json";
+import { parseReviewFile } from "./parse";
 import type { Dataset, Review } from "./types";
 
 /**
- * Real Zomato restaurant reviews (verbatim text, rating, date, restaurant and
- * reviewer as published). Sampled evenly from a public Zomato reviews export —
- * nothing in here is synthesized.
+ * The Zomato Reviews demo dataset comes from exactly one place: the uploaded
+ * zomato_reviews CSV. Only review_text, date and source exist in that file, so
+ * rating, reviewer and vote fields stay null — nothing is filled in.
  */
-const ZOMATO_REVIEWS = rawZomato as Review[];
+export const ZOMATO_DATASET_ID = "zomato-reviews";
 
 export const DEFAULT_DATASETS: Dataset[] = [
   {
-    id: "zomato-reviews",
+    id: ZOMATO_DATASET_ID,
     name: "Zomato Reviews",
-    status: "loaded",
-    reviews: ZOMATO_REVIEWS,
-    origin: "Zomato Restaurant reviews (public export, 1,500-review sample)",
+    status: "loading",
+    reviews: [],
+    origin: csvAsset.original_filename,
   },
 ];
+
+export async function loadZomatoReviews(): Promise<Review[]> {
+  const res = await fetch(csvAsset.url);
+  if (!res.ok) throw new Error(`Failed to load ${csvAsset.original_filename}`);
+  return parseReviewFile("zomato_reviews.csv", await res.text());
+}

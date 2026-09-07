@@ -1,10 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AppHeader } from "@/components/voc/AppHeader";
 import { InsightsPanel } from "@/components/voc/InsightsPanel";
 import { ReviewFeed, type FeedFilters } from "@/components/voc/ReviewFeed";
 import { analyze } from "@/lib/voc/analyze";
-import { DEFAULT_DATASETS } from "@/lib/voc/datasets";
+import { DEFAULT_DATASETS, ZOMATO_DATASET_ID, loadZomatoReviews } from "@/lib/voc/datasets";
 import { parseReviewFile } from "@/lib/voc/parse";
 import type { Dataset, Insight } from "@/lib/voc/types";
 
@@ -34,6 +34,29 @@ function Dashboard() {
 
   const dataset = datasets.find((d) => d.id === activeId) ?? datasets[0]!;
   const analysis = useMemo(() => analyze(dataset.reviews), [dataset]);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadZomatoReviews()
+      .then((reviews) => {
+        if (cancelled) return;
+        setDatasets((prev) =>
+          prev.map((d) =>
+            d.id === ZOMATO_DATASET_ID ? { ...d, status: "loaded", reviews } : d,
+          ),
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setDatasets((prev) =>
+          prev.map((d) => (d.id === ZOMATO_DATASET_ID ? { ...d, status: "empty" } : d)),
+        );
+        setError("Could not load the connected Zomato review file.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleUpload(file: File) {
     setError(null);

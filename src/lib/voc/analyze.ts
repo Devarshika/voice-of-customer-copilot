@@ -38,14 +38,25 @@ const NEGATIVE_WORDS = [
 
 const norm = (s: string) => s.toLowerCase();
 
+/** Lowercased verbatim text, cached so large datasets are only normalized once. */
+const lowerCache = new WeakMap<Review, string>();
+function low(r: Review): string {
+  let t = lowerCache.get(r);
+  if (t === undefined) {
+    t = norm(r.text);
+    lowerCache.set(r, t);
+  }
+  return t;
+}
+
 function isNegative(r: Review): boolean {
   if (r.rating !== null) return r.rating <= 3;
-  const t = norm(r.text);
+  const t = low(r);
   return NEGATIVE_WORDS.some((w) => t.includes(w));
 }
 
-function matches(text: string, keywords: string[]): boolean {
-  const t = norm(text);
+function matches(r: Review, keywords: string[]): boolean {
+  const t = low(r);
   return keywords.some((k) => t.includes(k));
 }
 
@@ -75,7 +86,7 @@ export function analyze(reviews: Review[]): Analysis {
 
   const themeMatches = THEMES.map((t, i) => ({
     theme: t,
-    insight: buildInsight(`theme-${i}`, t.label, reviews.filter((r) => matches(r.text, t.keywords))),
+    insight: buildInsight(`theme-${i}`, t.label, reviews.filter((r) => matches(r, t.keywords))),
   })).filter((x) => x.insight !== null) as { theme: (typeof THEMES)[number]; insight: Insight }[];
 
   const painPoints = themeMatches
@@ -108,7 +119,7 @@ export function analyze(reviews: Review[]): Analysis {
     buildInsight(
       `churn-${i}`,
       rule.label,
-      reviews.filter((r) => matches(r.text, rule.keywords) && isNegative(r)),
+      reviews.filter((r) => matches(r, rule.keywords) && isNegative(r)),
     ),
   )
     .filter((i): i is Insight => i !== null)
@@ -129,13 +140,13 @@ export function analyze(reviews: Review[]): Analysis {
     .sort((a, b) => b.score - a.score)
     .slice(0, 5);
 
-  const requestReviews = reviews.filter((r) => matches(r.text, OPPORTUNITY_KEYWORDS));
+  const requestReviews = reviews.filter((r) => matches(r, OPPORTUNITY_KEYWORDS));
   const opportunities = themeMatches
     .map(({ theme, insight }) =>
       buildInsight(
         `opp-${insight.id}`,
         theme.label,
-        requestReviews.filter((r) => matches(r.text, theme.keywords)),
+        requestReviews.filter((r) => matches(r, theme.keywords)),
       ),
     )
     .filter((i): i is Insight => i !== null)
@@ -163,16 +174,46 @@ export function analyze(reviews: Review[]): Analysis {
   };
 }
 
-/** Every insight (of any kind) that a given review is evidence for. */
-export function insightsForReview(analysis: Analysis, reviewId: string) {
-  const groups: { kind: string; items: Insight[] }[] = [
+type Group = { kind: string; items: Insight[] };
+
+/** reviewId -> supporting insights, built once per Analysis. */
+const evidenceIndex = new WeakMap<Analysis, Map<string, Group[]>>();
+
+function buildIndex(analysis: Analysis): Map<string, Group[]> {
+  const cached = evidenceIndex.get(analysis);
+  if (cached) return cached;
+  const groups: Group[] = [
     { kind: "Pain point", items: analysis.painPoints },
     { kind: "Emerging trend", items: analysis.trends },
     { kind: "Churn signal", items: analysis.churnSignals },
     { kind: "Prioritized", items: analysis.priorities },
     { kind: "Opportunity", items: analysis.opportunities },
   ];
-  return groups
-    .map((g) => ({ kind: g.kind, items: g.items.filter((i) => i.reviewIds.includes(reviewId)) }))
-    .filter((g) => g.items.length > 0);
+  const index = new Map<string, Group[]>();
+  for (const g of groups) {
+    for (const insight of g.items) {
+      for (const id of insight.reviewIds) {
+        const existing = index.get(id);
+        if (!existing) {
+          index.set(id, [{ kind: g.kind, items: [insight] }]);
+          continue;
+        }
+        const group = existing.find((e) => e.kind === g.kind);
+        if (group) group.items.push(insight);
+        else existing.push({ kind: g.kind, items: [insight] });
+      }
+    }
+  }
+  evidenceIndex.set(analysis, index);
+  return index;
+}
+
+/** Every insight (of any kind) that a given review is evidence for. */
+export function insightsForReview(analysis: Analysis, reviewId: string): Group[] {
+  return buildIndex(analysis).get(reviewId) ?? [];
+}
+
+/** Count of supporting insights, cheap for long feeds. */
+export function insightCountForReview(analysis: Analysis, reviewId: string): number {
+  return insightsForReview(analysis, reviewId).reduce((n, g) => n + g.items.length, 0);
 }
