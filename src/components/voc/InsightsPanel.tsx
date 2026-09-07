@@ -82,7 +82,11 @@ export function InsightsPanel({
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold">AI Insights</h2>
           <span className="text-[10.5px] text-ink-soft">
-            {empty ? "Awaiting connected data" : "Derived from connected review text"}
+            {dataset.status === "loading"
+              ? "Reading connected review file…"
+              : empty
+                ? "Awaiting connected data"
+                : "Derived from connected review text"}
           </span>
         </div>
       </div>
