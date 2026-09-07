@@ -35,6 +35,29 @@ function Dashboard() {
   const dataset = datasets.find((d) => d.id === activeId) ?? datasets[0]!;
   const analysis = useMemo(() => analyze(dataset.reviews), [dataset]);
 
+  useEffect(() => {
+    let cancelled = false;
+    loadZomatoReviews()
+      .then((reviews) => {
+        if (cancelled) return;
+        setDatasets((prev) =>
+          prev.map((d) =>
+            d.id === ZOMATO_DATASET_ID ? { ...d, status: "loaded", reviews } : d,
+          ),
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setDatasets((prev) =>
+          prev.map((d) => (d.id === ZOMATO_DATASET_ID ? { ...d, status: "empty" } : d)),
+        );
+        setError("Could not load the connected Zomato review file.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   async function handleUpload(file: File) {
     setError(null);
     try {
