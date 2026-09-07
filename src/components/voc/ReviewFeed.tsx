@@ -1,6 +1,6 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Analysis, Dataset, Insight, Review } from "@/lib/voc/types";
-import { insightsForReview } from "@/lib/voc/analyze";
+import { insightCountForReview, insightsForReview } from "@/lib/voc/analyze";
 
 function Stars({ rating }: { rating: number | null }) {
   if (rating === null) {
@@ -55,10 +55,15 @@ export function ReviewFeed({
     return [...set].sort();
   }, [dataset.reviews]);
 
+  const activeIds = useMemo(
+    () => (activeInsight ? new Set(activeInsight.reviewIds) : null),
+    [activeInsight],
+  );
+
   const visible = useMemo(() => {
     const q = filters.query.trim().toLowerCase();
     return dataset.reviews.filter((r: Review) => {
-      if (activeInsight && !activeInsight.reviewIds.includes(r.id)) return false;
+      if (activeIds && !activeIds.has(r.id)) return false;
       if (q && !r.text.toLowerCase().includes(q)) return false;
       if (filters.source !== "all" && r.source !== filters.source) return false;
       if (filters.rating === "low" && !(r.rating !== null && r.rating <= 3)) return false;
@@ -66,7 +71,12 @@ export function ReviewFeed({
       if (filters.rating === "none" && r.rating !== null) return false;
       return true;
     });
-  }, [dataset.reviews, filters, activeInsight]);
+  }, [dataset.reviews, filters, activeIds]);
+
+  const PAGE = 40;
+  const [limit, setLimit] = useState(PAGE);
+  useEffect(() => setLimit(PAGE), [filters, activeIds, dataset.id]);
+  const shown = visible.slice(0, limit);
 
   const selectClass =
     "frost-inset rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-ink outline-none focus:ring-2 focus:ring-brand/40";
@@ -77,7 +87,9 @@ export function ReviewFeed({
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-semibold">Customer Voice</h2>
           <span className="text-[11px] text-ink-soft">
-            {dataset.status === "empty"
+            {dataset.status === "loading"
+              ? "Loading reviews…"
+              : dataset.status === "empty"
               ? "No reviews connected"
               : `${visible.length.toLocaleString()} of ${dataset.reviews.length.toLocaleString()} reviews`}
           </span>
@@ -134,7 +146,11 @@ export function ReviewFeed({
       </div>
 
       <div className="flex-1 space-y-2.5 overflow-y-auto px-3 py-3">
-        {dataset.status === "empty" ? (
+        {dataset.status === "loading" ? (
+          <div className="frost-inset rounded-xl p-4 text-center text-[11px] text-ink-soft">
+            Loading the connected review file…
+          </div>
+        ) : dataset.status === "empty" ? (
           <div className="frost-inset rounded-xl p-4 text-center">
             <div className="text-[12px] font-medium text-ink">No review data connected</div>
             <p className="mt-1 text-[11px] text-ink-soft">
@@ -147,7 +163,7 @@ export function ReviewFeed({
             No reviews match the current filters.
           </div>
         ) : (
-          visible.map((r) => {
+          shown.map((r) => {
             const isSelected = selectedReviewId === r.id;
             const linked = isSelected ? insightsForReview(analysis, r.id) : [];
             return (
@@ -177,10 +193,7 @@ export function ReviewFeed({
                         ))
                     : null}
                   {(() => {
-                    const count = insightsForReview(analysis, r.id).reduce(
-                      (n, g) => n + g.items.length,
-                      0,
-                    );
+                    const count = insightCountForReview(analysis, r.id);
                     return count > 0 ? (
                       <span className="ml-auto font-medium text-brand">
                         Supports {count} insight{count === 1 ? "" : "s"}
@@ -220,6 +233,15 @@ export function ReviewFeed({
             );
           })
         )}
+        {visible.length > shown.length ? (
+          <button
+            onClick={() => setLimit((n) => n + PAGE)}
+            className="frost-inset w-full cursor-pointer rounded-xl p-2.5 text-[11px] font-medium text-brand"
+          >
+            Load {Math.min(PAGE, visible.length - shown.length).toLocaleString()} more of{" "}
+            {(visible.length - shown.length).toLocaleString()} remaining
+          </button>
+        ) : null}
       </div>
     </section>
   );
