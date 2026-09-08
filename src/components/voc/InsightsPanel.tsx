@@ -247,7 +247,8 @@ export function InsightsPanel({
 }: Props) {
   const { kpis } = analysis;
   const empty = dataset.status === "empty";
-  const maxMentions = analysis.painPoints[0]?.reviewIds.length ?? 1;
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const maxMentions = Math.max(...analysis.painPoints.map((p) => p.mentionCount), 1);
   const supports = (i: Insight) => !!selectedReviewId && i.reviewIds.includes(selectedReviewId);
   const toggle = (i: Insight) => onSelectInsight(activeInsightId === i.id ? null : i);
 
