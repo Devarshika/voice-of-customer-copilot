@@ -1,4 +1,179 @@
-import type { Analysis, Dataset, Insight } from "@/lib/voc/types";
+import { useState } from "react";
+import type { Analysis, Dataset, Insight, PainPoint } from "@/lib/voc/types";
+
+const INSUFFICIENT = "Insufficient evidence.";
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="text-[9.5px] font-semibold tracking-wider text-ink-soft uppercase">{label}</div>
+      <div className="mt-0.5 text-[11px] leading-relaxed text-ink">{children}</div>
+    </div>
+  );
+}
+
+function Sparkline({ points }: { points: { month: string; count: number }[] }) {
+  const max = Math.max(...points.map((p) => p.count), 1);
+  return (
+    <div className="mt-1 flex h-8 items-end gap-[2px]">
+      {points.map((p) => (
+        <div
+          key={p.month}
+          title={`${p.month}: ${p.count} mentions`}
+          className="flex-1 rounded-sm bg-brand/50"
+          style={{ height: `${Math.max(8, (p.count / max) * 100)}%` }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function PainPointCard({
+  pain,
+  active,
+  expanded,
+  supportsSelectedReview,
+  onSelect,
+  onToggleExpand,
+  maxMentions,
+}: {
+  pain: PainPoint;
+  active: boolean;
+  expanded: boolean;
+  supportsSelectedReview: boolean;
+  onSelect: () => void;
+  onToggleExpand: () => void;
+  maxMentions: number;
+}) {
+  const { trend, churn, opportunity, confidence, priority } = pain;
+  return (
+    <div
+      className={`frost-inset rounded-xl p-3 ${
+        active
+          ? "bg-brand/5 ring-1 ring-brand/40"
+          : supportsSelectedReview
+            ? "ring-1 ring-accent/50"
+            : ""
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <button onClick={onSelect} className="cursor-pointer text-left">
+          <span className="text-[13px] font-medium">{pain.label}</span>
+          <span className="ml-2 text-[10px] text-ink-soft">#{priority.rank}</span>
+        </button>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <span className="rounded-md bg-frost-deep/60 px-1.5 py-0.5 text-[9.5px] font-semibold text-ink-soft">
+            {confidence.level} confidence
+          </span>
+          <span
+            className="rounded-md px-1.5 py-0.5 text-[9.5px] font-semibold text-primary-foreground"
+            style={{ background: "var(--gradient-mark)" }}
+          >
+            {priority.impact}
+          </span>
+        </div>
+      </div>
+
+      <p className="mt-1.5 text-[11px] leading-relaxed text-ink-soft">{pain.description}</p>
+
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-frost-deep/70">
+        <div
+          className={active ? "h-full bg-brand" : "h-full bg-brand/70"}
+          style={{ width: `${Math.max(4, Math.round((pain.mentionCount / maxMentions) * 100))}%` }}
+        />
+      </div>
+
+      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-ink-soft">
+        <span className="font-medium text-ink">
+          {pain.mentionCount.toLocaleString()} mentions
+        </span>
+        <span>· {(pain.datasetShare * 100).toFixed(1)}% of dataset</span>
+        <span>· {Math.round(pain.negativeShare * 100)}% negative</span>
+        <span>
+          ·{" "}
+          {trend.evidence
+            ? `${trend.direction}${trend.changePct !== null ? ` ${trend.changePct > 0 ? "+" : ""}${Math.round(trend.changePct)}%` : ""}`
+            : "trend: insufficient evidence"}
+        </span>
+        <button onClick={onSelect} className="ml-auto cursor-pointer font-medium text-brand">
+          Filter reviews
+        </button>
+        <button onClick={onToggleExpand} className="cursor-pointer font-medium text-brand">
+          {expanded ? "Hide evidence" : "Evidence"}
+        </button>
+      </div>
+
+      {expanded ? (
+        <div className="mt-3 space-y-3 border-t border-white/60 pt-3">
+          <Field label="Trend over time (actual review dates)">
+            {trend.evidence ? (
+              <>
+                <div>
+                  {trend.earlier.toLocaleString()} → {trend.recent.toLocaleString()} dated mentions
+                  (earlier vs recent half of {trend.window.from} → {trend.window.to})
+                </div>
+                <Sparkline points={trend.months} />
+              </>
+            ) : (
+              INSUFFICIENT
+            )}
+          </Field>
+
+          <Field label="Confidence basis">{confidence.basis}</Field>
+
+          <Field label="Potential churn relevance">
+            {churn.evidence
+              ? `${churn.reviewIds.length.toLocaleString()} of these reviews (${Math.round(churn.share * 100)}%) also contain churn-risk language — ${churn.signals.join("; ")}. Signal only, not a prediction about any individual customer.`
+              : INSUFFICIENT}
+          </Field>
+
+          <Field label="AI-assisted priority">
+            Score {priority.score}/100 · rank #{priority.rank} · {priority.impact} impact.{" "}
+            {priority.rationale}
+          </Field>
+
+          <Field label="Potential product opportunity">
+            {opportunity.evidence ? (
+              <>
+                <div>{opportunity.statement}</div>
+                <div className="mt-1 text-[10px] text-ink-soft">
+                  Based on {opportunity.reviewIds.length.toLocaleString()} reviews that explicitly
+                  request something.
+                </div>
+                <ul className="mt-1.5 space-y-1">
+                  {opportunity.excerpts.map((e) => (
+                    <li key={e.reviewId} className="text-[10.5px] text-ink-soft italic">
+                      “{e.text}” <span className="not-italic">— {e.reviewId}</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              INSUFFICIENT
+            )}
+          </Field>
+
+          <Field label={`Supporting review excerpts (${pain.mentionCount.toLocaleString()} review IDs)`}>
+            <ul className="space-y-1.5">
+              {pain.excerpts.map((e) => (
+                <li key={e.reviewId} className="frost-inset rounded-lg p-2">
+                  <p className="text-[10.5px] leading-relaxed text-ink italic">“{e.text}”</p>
+                  <div className="mt-1 text-[9.5px] text-ink-soft">
+                    {e.reviewId}
+                    {e.date ? ` · ${e.date.slice(0, 10)}` : " · date not provided"}
+                  </div>
+                </li>
+              ))}
+            </ul>
+            <button onClick={onSelect} className="mt-1.5 cursor-pointer text-[10px] font-medium text-brand">
+              Show all {pain.mentionCount.toLocaleString()} supporting reviews on the left →
+            </button>
+          </Field>
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 type Props = {
   dataset: Dataset;
