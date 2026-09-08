@@ -57,9 +57,60 @@ export type Kpis = {
   dateRange: { from: string; to: string } | null;
 };
 
+/** A verbatim excerpt, always carrying the id of the review it came from. */
+export type Excerpt = {
+  reviewId: string;
+  text: string;
+  date: string | null;
+};
+
+export type MonthPoint = { month: string; count: number };
+
+/** "Insufficient evidence." is represented by evidence: false everywhere. */
+export type TrendEvidence =
+  | { evidence: false }
+  | {
+      evidence: true;
+      earlier: number;
+      recent: number;
+      changePct: number | null;
+      direction: "rising" | "falling" | "steady";
+      months: MonthPoint[];
+      window: { from: string; to: string };
+    };
+
+export type ChurnEvidence =
+  | { evidence: false }
+  | { evidence: true; reviewIds: string[]; share: number; signals: string[] };
+
+export type OpportunityEvidence =
+  | { evidence: false }
+  | { evidence: true; statement: string; reviewIds: string[]; excerpts: Excerpt[] };
+
+export type Confidence = {
+  level: "High" | "Moderate" | "Low";
+  /** Plain-language basis: counts only, never a fabricated score. */
+  basis: string;
+};
+
+/** One fully evidence-backed pain point insight. */
+export type PainPoint = Insight & {
+  description: string;
+  mentionCount: number;
+  /** Share of the whole connected dataset mentioning this pain point. */
+  datasetShare: number;
+  excerpts: Excerpt[];
+  trend: TrendEvidence;
+  confidence: Confidence;
+  churn: ChurnEvidence;
+  priority: { score: number; rank: number; impact: "High" | "Medium" | "Low"; rationale: string };
+  opportunity: OpportunityEvidence;
+};
+
 export type Analysis = {
   kpis: Kpis;
-  painPoints: Insight[];
+  /** Full engine output: every pain point with its complete evidence bundle. */
+  painPoints: PainPoint[];
   trends: Trend[];
   churnSignals: Insight[];
   priorities: PriorityItem[];
