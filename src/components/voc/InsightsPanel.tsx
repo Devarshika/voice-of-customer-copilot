@@ -310,22 +310,22 @@ export function InsightsPanel({
           <SectionLabel>Top Pain Points</SectionLabel>
           {analysis.painPoints.length === 0 ? (
             <Placeholder>
-              Placeholder — pain points are extracted from the wording of connected reviews. None to
-              show yet.
+              {dataset.status === "loaded"
+                ? "Insufficient evidence."
+                : "Pain points are extracted from the wording of connected reviews. None to show yet."}
             </Placeholder>
           ) : (
             <div className="space-y-2">
               {analysis.painPoints.slice(0, 6).map((p) => (
-                <InsightRow
+                <PainPointCard
                   key={p.id}
-                  insight={p}
+                  pain={p}
                   active={activeInsightId === p.id}
+                  expanded={expandedId === p.id}
                   supportsSelectedReview={supports(p)}
-                  onClick={() => toggle(p)}
-                  bar={p.reviewIds.length / maxMentions}
-                  meta={`${Math.round(p.negativeShare * 100)}% negative${
-                    p.avgRating !== null ? ` · avg ${p.avgRating.toFixed(1)}★` : ""
-                  } · click to filter reviews`}
+                  onSelect={() => toggle(p)}
+                  onToggleExpand={() => setExpandedId(expandedId === p.id ? null : p.id)}
+                  maxMentions={maxMentions}
                 />
               ))}
             </div>
