@@ -337,7 +337,7 @@ export function InsightsPanel({
           <div>
             <SectionLabel>Emerging Trends</SectionLabel>
             {analysis.trends.length === 0 ? (
-              <Placeholder>Placeholder — needs dated reviews to compare periods.</Placeholder>
+              <Placeholder>Insufficient evidence.</Placeholder>
             ) : (
               <div className="space-y-2">
                 {analysis.trends.slice(0, 3).map((t) => (
@@ -357,7 +357,7 @@ export function InsightsPanel({
           <div>
             <SectionLabel>Potential Churn Signals</SectionLabel>
             {analysis.churnSignals.length === 0 ? (
-              <Placeholder>Placeholder — no churn language detected in connected reviews.</Placeholder>
+              <Placeholder>Insufficient evidence.</Placeholder>
             ) : (
               <div className="space-y-2">
                 {analysis.churnSignals.slice(0, 3).map((c) => (
@@ -379,10 +379,7 @@ export function InsightsPanel({
         <div>
           <SectionLabel>AI Prioritization</SectionLabel>
           {analysis.priorities.length === 0 ? (
-            <Placeholder>
-              Placeholder — prioritization ranks pain points by reach and severity once data is
-              connected.
-            </Placeholder>
+            <Placeholder>Insufficient evidence.</Placeholder>
           ) : (
             <div className="space-y-2">
               {analysis.priorities.map((p) => (
@@ -414,9 +411,7 @@ export function InsightsPanel({
         <div>
           <SectionLabel>Potential Product Opportunities</SectionLabel>
           {analysis.opportunities.length === 0 ? (
-            <Placeholder>
-              Placeholder — opportunities come from reviews that explicitly request something.
-            </Placeholder>
+            <Placeholder>Insufficient evidence.</Placeholder>
           ) : (
             <div className="space-y-2">
               {analysis.opportunities.slice(0, 4).map((o) => (
