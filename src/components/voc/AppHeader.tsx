@@ -7,9 +7,20 @@ type Props = {
   onSelect: (id: string) => void;
   onUpload: (file: File) => void;
   error: string | null;
+  evaluationOpen: boolean;
+  onToggleEvaluation: () => void;
 };
 
-export function AppHeader({ datasets, activeId, onSelect, onUpload, error }: Props) {
+export function AppHeader({
+  datasets,
+  activeId,
+  onSelect,
+  onUpload,
+  error,
+  evaluationOpen,
+  onToggleEvaluation,
+}: Props) {
+
   const inputRef = useRef<HTMLInputElement>(null);
   const active = datasets.find((d) => d.id === activeId);
 
