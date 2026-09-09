@@ -96,7 +96,10 @@ export type Confidence = {
 /** One fully evidence-backed pain point insight. */
 export type PainPoint = Insight & {
   description: string;
+  /** Lexicon terms whose presence in real review text produced the match. */
+  keywords: string[];
   mentionCount: number;
+
   /** Share of the whole connected dataset mentioning this pain point. */
   datasetShare: number;
   excerpts: Excerpt[];

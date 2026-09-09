@@ -369,7 +369,9 @@ export function analyze(reviews: Review[]): Analysis {
       return {
         ...insight,
         description: theme.problem,
+        keywords: theme.keywords,
         mentionCount: insight.reviewIds.length,
+
         datasetShare: total ? insight.reviewIds.length / total : 0,
         excerpts,
         trend,

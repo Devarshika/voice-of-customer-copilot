@@ -1,7 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppHeader } from "@/components/voc/AppHeader";
+import { EvaluationPanel } from "@/components/voc/EvaluationPanel";
 import { InsightsPanel } from "@/components/voc/InsightsPanel";
+
 import { ReviewFeed, type FeedFilters } from "@/components/voc/ReviewFeed";
 import { analyze } from "@/lib/voc/analyze";
 import { DEFAULT_DATASETS, ZOMATO_DATASET_ID, loadZomatoReviews } from "@/lib/voc/datasets";
@@ -31,6 +33,8 @@ function Dashboard() {
   const [activeInsight, setActiveInsight] = useState<Insight | null>(null);
   const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null);
   const [filters, setFilters] = useState<FeedFilters>({ query: "", source: "all", rating: "all" });
+  const [evaluationOpen, setEvaluationOpen] = useState(false);
+
 
   const dataset = datasets.find((d) => d.id === activeId) ?? datasets[0]!;
   const analysis = useMemo(() => analyze(dataset.reviews), [dataset]);
@@ -110,7 +114,22 @@ function Dashboard() {
           }}
           onUpload={handleUpload}
           error={error}
+          evaluationOpen={evaluationOpen}
+          onToggleEvaluation={() => setEvaluationOpen((v) => !v)}
         />
+
+        {evaluationOpen ? (
+          <EvaluationPanel
+            dataset={dataset}
+            analysis={analysis}
+            onClose={() => setEvaluationOpen(false)}
+            onOpenEvidence={(pain, reviewIds) => {
+              setActiveInsight(pain);
+              setSelectedReviewId(reviewIds[0] ?? null);
+              setEvaluationOpen(false);
+            }}
+          />
+        ) : null}
 
         <div className="relative z-10 mt-4 grid grid-cols-[1fr_1.12fr] gap-4">
           <ReviewFeed
@@ -134,6 +153,7 @@ function Dashboard() {
             selectedReviewId={selectedReviewId}
           />
         </div>
+
       </div>
     </div>
   );

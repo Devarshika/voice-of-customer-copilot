@@ -7,9 +7,20 @@ type Props = {
   onSelect: (id: string) => void;
   onUpload: (file: File) => void;
   error: string | null;
+  evaluationOpen: boolean;
+  onToggleEvaluation: () => void;
 };
 
-export function AppHeader({ datasets, activeId, onSelect, onUpload, error }: Props) {
+export function AppHeader({
+  datasets,
+  activeId,
+  onSelect,
+  onUpload,
+  error,
+  evaluationOpen,
+  onToggleEvaluation,
+}: Props) {
+
   const inputRef = useRef<HTMLInputElement>(null);
   const active = datasets.find((d) => d.id === activeId);
 
@@ -49,6 +60,16 @@ export function AppHeader({ datasets, activeId, onSelect, onUpload, error }: Pro
           />
         </div>
         <button
+          onClick={onToggleEvaluation}
+          aria-pressed={evaluationOpen}
+          className={`frost-inset cursor-pointer rounded-lg px-3 py-1.5 text-[12px] font-semibold ${
+            evaluationOpen ? "text-brand ring-1 ring-brand/40" : "text-ink"
+          }`}
+        >
+          AI Evaluation
+        </button>
+        <button
+
           onClick={() => inputRef.current?.click()}
           className="btn-brand spec cursor-pointer rounded-lg px-3.5 py-1.5 text-[12px] font-semibold"
         >
