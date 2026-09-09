@@ -31,6 +31,8 @@ function Dashboard() {
   const [activeInsight, setActiveInsight] = useState<Insight | null>(null);
   const [selectedReviewId, setSelectedReviewId] = useState<string | null>(null);
   const [filters, setFilters] = useState<FeedFilters>({ query: "", source: "all", rating: "all" });
+  const [evaluationOpen, setEvaluationOpen] = useState(false);
+
 
   const dataset = datasets.find((d) => d.id === activeId) ?? datasets[0]!;
   const analysis = useMemo(() => analyze(dataset.reviews), [dataset]);
