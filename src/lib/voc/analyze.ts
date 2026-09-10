@@ -337,10 +337,17 @@ function buildTrend(matched: Review[], split: number | null): TrendEvidence {
   };
 }
 
+/** Confidence scales with the size of the connected dataset, never a fixed rule. */
 function buildConfidence(mentionCount: number, datedCount: number, total: number): Confidence {
   const share = total ? mentionCount / total : 0;
+  const strong = Math.max(30, Math.round(total * 0.02));
+  const moderate = Math.max(10, Math.round(total * 0.008));
   const level: Confidence["level"] =
-    mentionCount >= 200 && datedCount >= 50 ? "High" : mentionCount >= 50 ? "Moderate" : "Low";
+    mentionCount >= strong && datedCount >= mentionCount * 0.5
+      ? "High"
+      : mentionCount >= moderate
+        ? "Moderate"
+        : "Low";
   return {
     level,
     basis: `${mentionCount.toLocaleString()} matched reviews (${(share * 100).toFixed(1)}% of ${total.toLocaleString()}), ${datedCount.toLocaleString()} with dates`,
@@ -349,11 +356,25 @@ function buildConfidence(mentionCount: number, datedCount: number, total: number
 
 export function analyze(reviews: Review[]): Analysis {
   const total = reviews.length;
+  const limits = thresholds(total);
+  MIN_PAIN_EVIDENCE = limits.pain;
+  MIN_TREND_EVIDENCE = limits.trend;
+  MIN_OPPORTUNITY_EVIDENCE = limits.opportunity;
+  MIN_CHURN_EVIDENCE = limits.churn;
+
   const rated = reviews.filter((r) => r.rating !== null) as (Review & { rating: number })[];
   const times = reviews
     .map((r) => (r.date ? Date.parse(r.date) : NaN))
     .filter((n) => !Number.isNaN(n));
   const split = median(times);
+
+  // Themes: generic lexicon wording present in this file, plus wording mined
+  // from this file's own negative reviews.
+  const lexiconTerms = new Set(LEXICON_THEMES.flatMap((t) => t.keywords));
+  const THEMES: Theme[] = [
+    ...LEXICON_THEMES,
+    ...discoverThemes(reviews, MIN_PAIN_EVIDENCE, lexiconTerms),
+  ];
 
   // Single pass over the dataset: theme, churn and request membership.
   const themeMatched: Review[][] = THEMES.map(() => []);
@@ -389,10 +410,11 @@ export function analyze(reviews: Review[]): Analysis {
     matched: themeMatched[i]!,
     insight: buildInsight(`theme-${i}`, theme.label, themeMatched[i]!),
   })).filter((x) => x.insight !== null) as {
-    theme: (typeof THEMES)[number];
+    theme: Theme;
     matched: Review[];
     insight: Insight;
   }[];
+
 
   // Legacy insight collections kept for the trend / churn / opportunity sections.
   const trends = themeInsights
