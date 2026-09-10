@@ -13,19 +13,29 @@ import type {
 } from "./types";
 
 /**
- * Theme lexicon. Insights are derived ONLY by matching these keywords against
- * the verbatim review text of the connected dataset. Nothing is invented:
- * a theme with zero matched reviews never appears, and every derived field is
- * either computed from matched reviews or reported as insufficient evidence.
+ * Themes come from two places, both grounded in the connected review text:
+ *
+ * 1. Discovery — recurring words/phrases mined from the negative reviews of the
+ *    dataset that is actually loaded. This is what makes the engine work on any
+ *    uploaded file, with no domain assumptions.
+ * 2. An optional generic lexicon of common product-feedback themes, kept only
+ *    when the loaded reviews actually contain that wording.
+ *
+ * A theme with too few matched reviews for the size of the dataset never
+ * appears, and every derived field is computed from matched reviews or reported
+ * as insufficient evidence.
  */
-const THEMES: {
+type Theme = {
   label: string;
   keywords: string[];
   /** Neutral description of the problem the matched wording describes. */
   problem: string;
   /** Statement of the opportunity, only ever shown with supporting requests. */
   opportunity: string;
-}[] = [
+};
+
+const LEXICON_THEMES: Theme[] = [
+
   {
     label: "Delivery speed & reliability",
     keywords: ["late", "delay", "delayed", "slow delivery", "took an hour", "waiting", "eta", "on time", "never arrived", "delivery time"],
@@ -94,31 +104,130 @@ const THEMES: {
   },
 ];
 
+/**
+ * Churn wording is deliberately product-agnostic: it looks for the customer
+ * stating they will stop, cancel, or move elsewhere, or expressing severe
+ * repeated dissatisfaction. No competitor or vertical is assumed.
+ */
 const CHURN_RULES: { label: string; keywords: string[] }[] = [
-  { label: "Explicit intent to stop using the product", keywords: ["uninstall", "deleting the app", "delete the app", "never order", "last time", "stop using", "won't use", "will not use", "done with"] },
-  { label: "Switching to a competitor", keywords: ["switch", "switching", "swiggy", "competitor", "better app", "moved to", "instead of"] },
-  { label: "Long-tenure customer expressing decline", keywords: ["used to be", "years", "loyal", "since", "gone downhill", "getting worse", "declined"] },
-  { label: "Cancellation & refund escalation", keywords: ["cancel", "cancelled", "canceled", "refund not", "no refund", "chargeback"] },
+  { label: "Explicit intent to stop using the product", keywords: ["uninstall", "deleting the app", "delete the app", "deleted the app", "never again", "never order", "never buy", "never use", "last time", "stop using", "won't use", "will not use", "not coming back", "done with", "no longer use"] },
+  { label: "Switching to an alternative", keywords: ["switch", "switching", "switched", "competitor", "better app", "better alternative", "moved to", "moving to", "going elsewhere", "somewhere else", "instead of"] },
+  { label: "Long-tenure customer expressing decline", keywords: ["used to be", "loyal", "gone downhill", "getting worse", "declined", "not what it used to", "years of using"] },
+  { label: "Cancellation & refund escalation", keywords: ["cancel", "cancelled", "canceled", "cancelling", "unsubscribe", "refund not", "no refund", "chargeback", "want my money back"] },
+  { label: "Severe repeated dissatisfaction", keywords: ["every time", "again and again", "repeatedly", "still not fixed", "third time", "multiple times", "worst experience", "waste of money"] },
 ];
 
 const OPPORTUNITY_KEYWORDS = [
   "wish", "should add", "please add", "would be great", "hope you", "suggest", "feature request",
   "would love", "needs an option", "add an option", "allow us", "why can't", "why cant",
+  "should have", "please fix", "needs to", "it would help", "request you",
 ];
 
 const NEGATIVE_WORDS = [
   "bad", "worst", "terrible", "awful", "poor", "horrible", "disappointed", "disappointing",
   "hate", "useless", "never", "problem", "issue", "annoying", "frustrating", "pathetic", "waste",
+  "broken", "unacceptable", "rude", "slow", "failed", "error", "complaint", "unhappy",
 ];
 
-/** Minimum matched reviews before a pain point is reported at all. */
-const MIN_PAIN_EVIDENCE = 5;
-/** Minimum dated matched reviews before a trend is reported. */
-const MIN_TREND_EVIDENCE = 10;
-/** Minimum explicit requests before an opportunity is reported. */
-const MIN_OPPORTUNITY_EVIDENCE = 3;
-/** Minimum churn-language matches before churn relevance is reported. */
-const MIN_CHURN_EVIDENCE = 3;
+/**
+ * Evidence thresholds scale with the size of the connected dataset, so a
+ * 1,000-review file is analysed the same way a 100,000-review file is.
+ */
+function thresholds(total: number) {
+  const share = (pct: number, floor: number) =>
+    Math.max(floor, Math.round((total * pct) / 100));
+  return {
+    pain: Math.min(share(0.5, 3), 200),
+    trend: Math.min(share(0.6, 6), 300),
+    opportunity: Math.min(share(0.2, 2), 100),
+    churn: Math.min(share(0.2, 2), 100),
+  };
+}
+
+/** Set once per analyze() call from the dataset size. */
+let MIN_PAIN_EVIDENCE = 3;
+let MIN_TREND_EVIDENCE = 6;
+let MIN_OPPORTUNITY_EVIDENCE = 2;
+let MIN_CHURN_EVIDENCE = 2;
+
+const STOPWORDS = new Set([
+  "the","a","an","and","or","but","if","then","than","that","this","these","those","is","are","was","were","be","been","being","am","do","does","did","doing","have","has","had","having","i","me","my","we","our","you","your","he","she","it","its","they","them","their","of","in","on","at","to","for","with","from","by","as","about","into","over","after","before","up","down","out","off","again","very","so","just","too","also","not","no","nor","only","own","same","such","can","cant","will","would","should","could","may","might","must","there","here","when","where","why","how","what","which","who","whom","all","any","both","each","few","more","most","other","some","one","two","get","got","get","really","much","many","because","while","during","still","even","ever","never","always","use","used","using","app","order","orders","ordered","time","times","good","great","nice","best","like","love","thank","thanks","please","dont","doesnt","didnt","im","ive","was","were","us","he's","made","make","went","give","given","take","taken","now","back","first","last","next","don","t","s","re","ll","ve","m","d",
+]);
+
+/** Reviews scanned when mining recurring wording (deterministic prefix). */
+const DISCOVERY_SAMPLE = 20000;
+/** Maximum discovered themes kept. */
+const MAX_DISCOVERED = 12;
+
+function tokenize(text: string): string[] {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9' ]+/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && w.length < 24 && !STOPWORDS.has(w));
+}
+
+/**
+ * Mine recurring words and phrases from the negative reviews of the connected
+ * dataset. Each surviving term becomes a theme whose evidence is, by
+ * construction, the reviews that literally contain that term.
+ */
+function discoverThemes(reviews: Review[], minCount: number, taken: Set<string>): Theme[] {
+  const sample = reviews.length > DISCOVERY_SAMPLE ? reviews.slice(0, DISCOVERY_SAMPLE) : reviews;
+  const negDf = new Map<string, number>();
+  const allDf = new Map<string, number>();
+  let negTotal = 0;
+
+  for (const r of sample) {
+    const negative = isNegative(r);
+    if (negative) negTotal += 1;
+    const words = tokenize(r.text);
+    const seen = new Set<string>();
+    for (let i = 0; i < words.length; i++) {
+      seen.add(words[i]!);
+      if (i + 1 < words.length) seen.add(`${words[i]} ${words[i + 1]}`);
+    }
+    for (const term of seen) {
+      allDf.set(term, (allDf.get(term) ?? 0) + 1);
+      if (negative) negDf.set(term, (negDf.get(term) ?? 0) + 1);
+    }
+  }
+
+  const scale = sample.length ? reviews.length / sample.length : 1;
+  const scaled = (n: number) => n * scale;
+
+  const candidates = [...negDf.entries()]
+    .filter(([term, n]) => {
+      if (scaled(n) < minCount) return false;
+      const all = allDf.get(term) ?? n;
+      // The term must be negative-leaning within this dataset.
+      return n / all >= 0.5;
+    })
+    // Prefer phrases, then frequency: phrases describe problems more precisely.
+    .sort((a, b) => {
+      const phrase = (t: string) => (t.includes(" ") ? 1 : 0);
+      const d = phrase(b[0]) - phrase(a[0]);
+      return d !== 0 ? d : b[1] - a[1];
+    });
+
+  const kept: Theme[] = [];
+  const keptTerms: string[] = [];
+  for (const [term, n] of candidates) {
+    if (taken.has(term)) continue;
+    if (keptTerms.some((k) => k.includes(term) || term.includes(k))) continue;
+    keptTerms.push(term);
+    const negShare = negTotal ? n / negTotal : 0;
+    kept.push({
+      label: term.replace(/\b\w/g, (c) => c.toUpperCase()),
+      keywords: [term],
+      problem: `Recurring wording in the connected reviews: “${term}” appears in ${Math.round(scaled(n)).toLocaleString()} reviews that read as negative (${(negShare * 100).toFixed(1)}% of the negative reviews sampled).`,
+      opportunity: `Potential opportunity — requires further customer validation: investigate what reviewers describe around “${term}” and address it where they explicitly ask.`,
+    });
+    if (kept.length >= MAX_DISCOVERED) break;
+  }
+  return kept;
+}
+
 
 const norm = (s: string) => s.toLowerCase();
 
@@ -228,10 +337,17 @@ function buildTrend(matched: Review[], split: number | null): TrendEvidence {
   };
 }
 
+/** Confidence scales with the size of the connected dataset, never a fixed rule. */
 function buildConfidence(mentionCount: number, datedCount: number, total: number): Confidence {
   const share = total ? mentionCount / total : 0;
+  const strong = Math.max(30, Math.round(total * 0.02));
+  const moderate = Math.max(10, Math.round(total * 0.008));
   const level: Confidence["level"] =
-    mentionCount >= 200 && datedCount >= 50 ? "High" : mentionCount >= 50 ? "Moderate" : "Low";
+    mentionCount >= strong && datedCount >= mentionCount * 0.5
+      ? "High"
+      : mentionCount >= moderate
+        ? "Moderate"
+        : "Low";
   return {
     level,
     basis: `${mentionCount.toLocaleString()} matched reviews (${(share * 100).toFixed(1)}% of ${total.toLocaleString()}), ${datedCount.toLocaleString()} with dates`,
@@ -240,11 +356,25 @@ function buildConfidence(mentionCount: number, datedCount: number, total: number
 
 export function analyze(reviews: Review[]): Analysis {
   const total = reviews.length;
+  const limits = thresholds(total);
+  MIN_PAIN_EVIDENCE = limits.pain;
+  MIN_TREND_EVIDENCE = limits.trend;
+  MIN_OPPORTUNITY_EVIDENCE = limits.opportunity;
+  MIN_CHURN_EVIDENCE = limits.churn;
+
   const rated = reviews.filter((r) => r.rating !== null) as (Review & { rating: number })[];
   const times = reviews
     .map((r) => (r.date ? Date.parse(r.date) : NaN))
     .filter((n) => !Number.isNaN(n));
   const split = median(times);
+
+  // Themes: generic lexicon wording present in this file, plus wording mined
+  // from this file's own negative reviews.
+  const lexiconTerms = new Set(LEXICON_THEMES.flatMap((t) => t.keywords));
+  const THEMES: Theme[] = [
+    ...LEXICON_THEMES,
+    ...discoverThemes(reviews, MIN_PAIN_EVIDENCE, lexiconTerms),
+  ];
 
   // Single pass over the dataset: theme, churn and request membership.
   const themeMatched: Review[][] = THEMES.map(() => []);
@@ -280,10 +410,11 @@ export function analyze(reviews: Review[]): Analysis {
     matched: themeMatched[i]!,
     insight: buildInsight(`theme-${i}`, theme.label, themeMatched[i]!),
   })).filter((x) => x.insight !== null) as {
-    theme: (typeof THEMES)[number];
+    theme: Theme;
     matched: Review[];
     insight: Insight;
   }[];
+
 
   // Legacy insight collections kept for the trend / churn / opportunity sections.
   const trends = themeInsights
