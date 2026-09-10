@@ -13,19 +13,29 @@ import type {
 } from "./types";
 
 /**
- * Theme lexicon. Insights are derived ONLY by matching these keywords against
- * the verbatim review text of the connected dataset. Nothing is invented:
- * a theme with zero matched reviews never appears, and every derived field is
- * either computed from matched reviews or reported as insufficient evidence.
+ * Themes come from two places, both grounded in the connected review text:
+ *
+ * 1. Discovery — recurring words/phrases mined from the negative reviews of the
+ *    dataset that is actually loaded. This is what makes the engine work on any
+ *    uploaded file, with no domain assumptions.
+ * 2. An optional generic lexicon of common product-feedback themes, kept only
+ *    when the loaded reviews actually contain that wording.
+ *
+ * A theme with too few matched reviews for the size of the dataset never
+ * appears, and every derived field is computed from matched reviews or reported
+ * as insufficient evidence.
  */
-const THEMES: {
+type Theme = {
   label: string;
   keywords: string[];
   /** Neutral description of the problem the matched wording describes. */
   problem: string;
   /** Statement of the opportunity, only ever shown with supporting requests. */
   opportunity: string;
-}[] = [
+};
+
+const LEXICON_THEMES: Theme[] = [
+
   {
     label: "Delivery speed & reliability",
     keywords: ["late", "delay", "delayed", "slow delivery", "took an hour", "waiting", "eta", "on time", "never arrived", "delivery time"],
