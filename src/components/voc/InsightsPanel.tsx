@@ -138,8 +138,10 @@ function PainPointCard({
                 <div>{opportunity.statement}</div>
                 <div className="mt-1 text-[10px] text-ink-soft">
                   Based on {opportunity.reviewIds.length.toLocaleString()} reviews that explicitly
-                  request something.
+                  request something. Potential opportunity only — requires further customer
+                  validation, not a roadmap decision.
                 </div>
+
                 <ul className="mt-1.5 space-y-1">
                   {opportunity.excerpts.map((e) => (
                     <li key={e.reviewId} className="text-[10.5px] text-ink-soft italic">
