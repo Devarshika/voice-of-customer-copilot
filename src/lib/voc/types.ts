@@ -110,6 +110,13 @@ export type PainPoint = Insight & {
   opportunity: OpportunityEvidence;
 };
 
+/** A solution hypothesis derived from — and traceable to — one pain point. */
+export type OpportunityItem = Insight & {
+  /** The pain point this opportunity addresses. */
+  painLabel: string;
+  painPointId: string;
+};
+
 export type Analysis = {
   kpis: Kpis;
   /** Full engine output: every pain point with its complete evidence bundle. */
@@ -117,5 +124,5 @@ export type Analysis = {
   trends: Trend[];
   churnSignals: Insight[];
   priorities: PriorityItem[];
-  opportunities: Insight[];
+  opportunities: OpportunityItem[];
 };
