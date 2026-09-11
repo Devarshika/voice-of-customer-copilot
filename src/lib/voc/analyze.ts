@@ -6,6 +6,7 @@ import type {
   Insight,
   MonthPoint,
   OpportunityEvidence,
+  OpportunityItem,
   PainPoint,
   PriorityItem,
   Review,
