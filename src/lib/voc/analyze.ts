@@ -147,7 +147,6 @@ function thresholds(total: number) {
 /** Set once per analyze() call from the dataset size. */
 let MIN_PAIN_EVIDENCE = 3;
 let MIN_TREND_EVIDENCE = 6;
-let MIN_OPPORTUNITY_EVIDENCE = 2;
 let MIN_CHURN_EVIDENCE = 2;
 
 const STOPWORDS = new Set([
@@ -359,7 +358,6 @@ export function analyze(reviews: Review[]): Analysis {
   const limits = thresholds(total);
   MIN_PAIN_EVIDENCE = limits.pain;
   MIN_TREND_EVIDENCE = limits.trend;
-  MIN_OPPORTUNITY_EVIDENCE = limits.opportunity;
   MIN_CHURN_EVIDENCE = limits.churn;
 
   const rated = reviews.filter((r) => r.rating !== null) as (Review & { rating: number })[];
@@ -382,7 +380,6 @@ export function analyze(reviews: Review[]): Analysis {
   const churnSet = new Set<string>();
   const churnLabelsByReview = new Map<string, string[]>();
   const requestSet = new Set<string>();
-  const requestReviews: Review[] = [];
 
   for (const r of reviews) {
     const t = low(r);
@@ -401,7 +398,6 @@ export function analyze(reviews: Review[]): Analysis {
     });
     if (OPPORTUNITY_KEYWORDS.some((k) => t.includes(k))) {
       requestSet.add(r.id);
-      requestReviews.push(r);
     }
   }
 
