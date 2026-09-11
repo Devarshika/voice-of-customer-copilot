@@ -521,6 +521,20 @@ export function analyze(reviews: Review[]): Analysis {
     impact: p.priority.impact,
   }));
 
+  // One potential opportunity per sufficiently evidenced pain point, linked to
+  // that pain point's own supporting review IDs.
+  const opportunities: Insight[] = painPoints
+    .filter((p) => p.opportunity.evidence)
+    .map((p) => ({
+      id: `opp-${p.id}`,
+      label: p.label,
+      reviewIds: p.reviewIds,
+      negativeShare: p.negativeShare,
+      avgRating: p.avgRating,
+    }))
+    .sort((a, b) => b.reviewIds.length - a.reviewIds.length);
+
+
   return {
     kpis: {
       reviewCount: total,
