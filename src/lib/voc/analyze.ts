@@ -30,7 +30,7 @@ type Theme = {
   keywords: string[];
   /** Neutral description of the problem the matched wording describes. */
   problem: string;
-  /** Statement of the opportunity, only ever shown with supporting requests. */
+  /** Statement of the opportunity, derived from the problem the theme describes. */
   opportunity: string;
 };
 
@@ -40,67 +40,67 @@ const LEXICON_THEMES: Theme[] = [
     label: "Delivery speed & reliability",
     keywords: ["late", "delay", "delayed", "slow delivery", "took an hour", "waiting", "eta", "on time", "never arrived", "delivery time"],
     problem: "Reviews describe orders arriving later than promised, long waits, or deliveries that never arrived.",
-    opportunity: "Tighten delivery-time promises and communicate delays proactively where reviewers ask for it.",
+    opportunity: "Tighten delivery-time promises and proactively communicate delays for the orders these reviews describe.",
   },
   {
     label: "Food quality & freshness",
     keywords: ["cold", "stale", "quality", "tasteless", "spoiled", "soggy", "fresh", "burnt", "raw"],
     problem: "Reviews report food arriving cold, stale, soggy or otherwise below expected quality.",
-    opportunity: "Add quality safeguards and food-condition feedback where reviewers explicitly request it.",
+    opportunity: "Add quality safeguards and food-condition checks targeting the problems these reviews describe.",
   },
   {
     label: "Order accuracy & missing items",
     keywords: ["missing", "wrong order", "wrong item", "incomplete", "not delivered", "different item"],
     problem: "Reviews describe missing items, wrong items, or incomplete orders.",
-    opportunity: "Introduce order-verification and fast missing-item resolution asked for in reviews.",
+    opportunity: "Introduce order verification and fast missing-item resolution for the failures these reviews describe.",
   },
   {
     label: "Packaging & spillage",
     keywords: ["packaging", "spilled", "leaked", "leaking", "crushed", "container"],
     problem: "Reviews report leaking, spilled or crushed packaging on arrival.",
-    opportunity: "Set packaging standards for spill-prone items, as reviewers suggest.",
+    opportunity: "Set packaging standards for the spill-prone items these reviews describe.",
   },
   {
     label: "Pricing, charges & coupons",
     keywords: ["expensive", "price", "pricing", "charges", "surge", "coupon", "offer", "discount", "overcharged", "delivery fee"],
     problem: "Reviews question prices, added charges, or coupons and offers not applying as expected.",
-    opportunity: "Make charges and coupon rules explicit at checkout where reviewers ask for clarity.",
+    opportunity: "Make charges and coupon rules explicit at checkout to address the confusion these reviews describe.",
   },
   {
     label: "Refunds & payments",
     keywords: ["refund", "payment", "wallet", "money not", "deducted", "transaction", "failed payment", "cashback"],
     problem: "Reviews describe failed payments, deducted money, or refunds not received.",
-    opportunity: "Give refund status visibility and self-serve payment recovery requested in reviews.",
+    opportunity: "Give refund status visibility and self-serve payment recovery for the failures these reviews describe.",
   },
   {
     label: "Customer support",
     keywords: ["support", "customer care", "no response", "chatbot", "agent", "helpline", "complaint"],
     problem: "Reviews describe unresponsive or unhelpful support and unresolved complaints.",
-    opportunity: "Offer faster escalation to a human where reviewers explicitly ask for it.",
+    opportunity: "Offer faster escalation to a human for the unresolved complaints these reviews describe.",
   },
   {
     label: "App performance & stability",
     keywords: ["crash", "crashes", "bug", "hangs", "freeze", "lag", "slow app", "not loading", "login issue"],
     problem: "Reviews report crashes, freezes, slowness or sign-in failures in the app.",
-    opportunity: "Prioritise stability work on the flows reviewers name.",
+    opportunity: "Prioritise stability work on the flows these reviews describe failing.",
   },
   {
     label: "Search & discovery",
     keywords: ["search", "filter", "find restaurant", "recommendation", "browse", "sort"],
     problem: "Reviews describe difficulty finding restaurants or dishes through search, filters or sorting.",
-    opportunity: "Extend filters and sorting options that reviewers request by name.",
+    opportunity: "Extend filters and sorting to address the discovery difficulty these reviews describe.",
   },
   {
     label: "Delivery partner experience",
     keywords: ["delivery partner", "rider", "driver", "delivery boy", "rude", "behaviour", "behavior"],
     problem: "Reviews describe negative interactions or conduct issues with delivery partners.",
-    opportunity: "Add partner conduct feedback and follow-up that reviewers ask for.",
+    opportunity: "Add delivery-partner conduct feedback and follow-up for the incidents these reviews describe.",
   },
   {
     label: "Order tracking",
     keywords: ["tracking", "track order", "live location", "map", "status"],
     problem: "Reviews describe inaccurate, stalled or missing order tracking and status updates.",
-    opportunity: "Improve live tracking accuracy and status detail where reviewers request it.",
+    opportunity: "Improve live tracking accuracy and status detail for the gaps these reviews describe.",
   },
 ];
 
@@ -221,7 +221,7 @@ function discoverThemes(reviews: Review[], minCount: number, taken: Set<string>)
       label: term.replace(/\b\w/g, (c) => c.toUpperCase()),
       keywords: [term],
       problem: `Recurring wording in the connected reviews: “${term}” appears in ${Math.round(scaled(n)).toLocaleString()} reviews that read as negative (${(negShare * 100).toFixed(1)}% of the negative reviews sampled).`,
-      opportunity: `Potential opportunity — requires further customer validation: investigate what reviewers describe around “${term}” and address it where they explicitly ask.`,
+      opportunity: `Address what reviewers describe around “${term}” in the connected reviews.`,
     });
     if (kept.length >= MAX_DISCOVERED) break;
   }
