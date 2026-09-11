@@ -485,17 +485,21 @@ export function analyze(reviews: Review[]): Analysis {
             }
           : { evidence: false };
 
-      const oppIds = insight.reviewIds.filter((id) => requestSet.has(id));
-      const oppReviews = matched.filter((r) => requestSet.has(r.id));
-      const opportunity: OpportunityEvidence =
-        oppIds.length >= MIN_OPPORTUNITY_EVIDENCE
-          ? {
-              evidence: true,
-              statement: theme.opportunity,
-              reviewIds: oppIds,
-              excerpts: oppReviews.slice(0, 3).map((r) => excerpt(r, OPPORTUNITY_KEYWORDS)),
-            }
-          : { evidence: false };
+      // Opportunities follow from the pain point itself: any pain point with
+      // enough evidence to report also has enough evidence for a potential,
+      // validation-pending opportunity. Reviews that explicitly ask for
+      // something are preferred as excerpts when they exist, but not required.
+      const requested = matched.filter((r) => requestSet.has(r.id));
+      const oppExcerptSource = requested.length ? requested : excerptSource;
+      const opportunity: OpportunityEvidence = {
+        evidence: true,
+        statement: theme.opportunity,
+        reviewIds: insight.reviewIds,
+        excerpts: oppExcerptSource
+          .slice(0, 3)
+          .map((r) => excerpt(r, requested.length ? OPPORTUNITY_KEYWORDS : theme.keywords)),
+      };
+
 
       return {
         ...insight,
