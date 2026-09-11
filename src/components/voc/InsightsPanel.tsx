@@ -137,10 +137,11 @@ function PainPointCard({
               <>
                 <div>{opportunity.statement}</div>
                 <div className="mt-1 text-[10px] text-ink-soft">
-                  Based on {opportunity.reviewIds.length.toLocaleString()} reviews that explicitly
-                  request something. Potential opportunity only — requires further customer
-                  validation, not a roadmap decision.
+                  Potential product opportunity — requires further customer validation. Derived from
+                  this pain point and its {opportunity.reviewIds.length.toLocaleString()} connected
+                  supporting reviews. Not a roadmap decision or a guaranteed solution.
                 </div>
+
 
                 <ul className="mt-1.5 space-y-1">
                   {opportunity.excerpts.map((e) => (
