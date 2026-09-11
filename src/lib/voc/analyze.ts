@@ -220,7 +220,7 @@ function discoverThemes(reviews: Review[], minCount: number, taken: Set<string>)
       label: term.replace(/\b\w/g, (c) => c.toUpperCase()),
       keywords: [term],
       problem: `Recurring wording in the connected reviews: “${term}” appears in ${Math.round(scaled(n)).toLocaleString()} reviews that read as negative (${(negShare * 100).toFixed(1)}% of the negative reviews sampled).`,
-      opportunity: `Address what reviewers describe around “${term}” in the connected reviews.`,
+      opportunity: `Reduce the “${term}” friction these reviews describe, in the flows where it keeps coming up.`,
     });
     if (kept.length >= MAX_DISCOVERED) break;
   }
@@ -514,11 +514,14 @@ export function analyze(reviews: Review[]): Analysis {
 
   // One potential opportunity per sufficiently evidenced pain point, linked to
   // that pain point's own supporting review IDs.
-  const opportunities: Insight[] = painPoints
+  const opportunities: OpportunityItem[] = painPoints
     .filter((p) => p.opportunity.evidence)
     .map((p) => ({
       id: `opp-${p.id}`,
-      label: p.label,
+      // A solution hypothesis, not a repeat of the pain point name.
+      label: p.opportunity.evidence ? p.opportunity.statement : p.label,
+      painLabel: p.label,
+      painPointId: p.id,
       reviewIds: p.reviewIds,
       negativeShare: p.negativeShare,
       avgRating: p.avgRating,

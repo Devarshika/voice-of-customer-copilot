@@ -426,11 +426,15 @@ export function InsightsPanel({
                   }`}
                 >
                   <div className="text-[12.5px] font-medium">{o.label}</div>
-                  <div className="mt-1 text-[11px] text-ink-soft">
+                  <div className="mt-1 text-[10.5px] text-ink-soft">
+                    From pain point: <span className="text-ink">{o.painLabel}</span> ·{" "}
                     {o.reviewIds.length.toLocaleString()} supporting review
-                    {o.reviewIds.length === 1 ? "" : "s"} · potential opportunity — requires further
-                    customer validation
+                    {o.reviewIds.length === 1 ? "" : "s"}
                   </div>
+                  <div className="mt-1 text-[10px] text-ink-soft/80">
+                    Potential opportunity — requires further customer validation
+                  </div>
+
 
                 </button>
               ))}
