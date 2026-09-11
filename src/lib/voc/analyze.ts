@@ -247,11 +247,6 @@ function isNegative(r: Review): boolean {
   return NEGATIVE_WORDS.some((w) => t.includes(w));
 }
 
-function matches(r: Review, keywords: string[]): boolean {
-  const t = low(r);
-  return keywords.some((k) => t.includes(k));
-}
-
 function firstMatchedKeyword(r: Review, keywords: string[]): string | null {
   const t = low(r);
   for (const k of keywords) if (t.includes(k)) return k;
