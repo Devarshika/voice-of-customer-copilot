@@ -427,9 +427,11 @@ export function InsightsPanel({
                 >
                   <div className="text-[12.5px] font-medium">{o.label}</div>
                   <div className="mt-1 text-[11px] text-ink-soft">
-                    {o.reviewIds.length} request{o.reviewIds.length === 1 ? "" : "s"} in connected
-                    reviews
+                    {o.reviewIds.length.toLocaleString()} supporting review
+                    {o.reviewIds.length === 1 ? "" : "s"} · potential opportunity — requires further
+                    customer validation
                   </div>
+
                 </button>
               ))}
             </div>
