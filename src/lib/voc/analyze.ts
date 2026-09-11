@@ -433,16 +433,8 @@ export function analyze(reviews: Review[]): Analysis {
     .filter((i): i is Insight => i !== null && i.reviewIds.length >= MIN_CHURN_EVIDENCE)
     .sort((a, b) => b.reviewIds.length - a.reviewIds.length);
 
-  const opportunities = themeInsights
-    .map(({ theme, insight }) =>
-      buildInsight(
-        `opp-${insight.id}`,
-        theme.label,
-        requestReviews.filter((r) => matches(r, theme.keywords)),
-      ),
-    )
-    .filter((i): i is Insight => i !== null && i.reviewIds.length >= MIN_OPPORTUNITY_EVIDENCE)
-    .sort((a, b) => b.reviewIds.length - a.reviewIds.length);
+  // Opportunities are derived from the pain points below (see `opportunities`).
+
 
   // Pain points: negative-dominant themes with enough evidence to report.
   const candidates = themeInsights
