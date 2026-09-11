@@ -30,7 +30,7 @@ type Theme = {
   keywords: string[];
   /** Neutral description of the problem the matched wording describes. */
   problem: string;
-  /** Statement of the opportunity, only ever shown with supporting requests. */
+  /** Statement of the opportunity, derived from the problem the theme describes. */
   opportunity: string;
 };
 
@@ -40,67 +40,67 @@ const LEXICON_THEMES: Theme[] = [
     label: "Delivery speed & reliability",
     keywords: ["late", "delay", "delayed", "slow delivery", "took an hour", "waiting", "eta", "on time", "never arrived", "delivery time"],
     problem: "Reviews describe orders arriving later than promised, long waits, or deliveries that never arrived.",
-    opportunity: "Tighten delivery-time promises and communicate delays proactively where reviewers ask for it.",
+    opportunity: "Tighten delivery-time promises and proactively communicate delays for the orders these reviews describe.",
   },
   {
     label: "Food quality & freshness",
     keywords: ["cold", "stale", "quality", "tasteless", "spoiled", "soggy", "fresh", "burnt", "raw"],
     problem: "Reviews report food arriving cold, stale, soggy or otherwise below expected quality.",
-    opportunity: "Add quality safeguards and food-condition feedback where reviewers explicitly request it.",
+    opportunity: "Add quality safeguards and food-condition checks targeting the problems these reviews describe.",
   },
   {
     label: "Order accuracy & missing items",
     keywords: ["missing", "wrong order", "wrong item", "incomplete", "not delivered", "different item"],
     problem: "Reviews describe missing items, wrong items, or incomplete orders.",
-    opportunity: "Introduce order-verification and fast missing-item resolution asked for in reviews.",
+    opportunity: "Introduce order verification and fast missing-item resolution for the failures these reviews describe.",
   },
   {
     label: "Packaging & spillage",
     keywords: ["packaging", "spilled", "leaked", "leaking", "crushed", "container"],
     problem: "Reviews report leaking, spilled or crushed packaging on arrival.",
-    opportunity: "Set packaging standards for spill-prone items, as reviewers suggest.",
+    opportunity: "Set packaging standards for the spill-prone items these reviews describe.",
   },
   {
     label: "Pricing, charges & coupons",
     keywords: ["expensive", "price", "pricing", "charges", "surge", "coupon", "offer", "discount", "overcharged", "delivery fee"],
     problem: "Reviews question prices, added charges, or coupons and offers not applying as expected.",
-    opportunity: "Make charges and coupon rules explicit at checkout where reviewers ask for clarity.",
+    opportunity: "Make charges and coupon rules explicit at checkout to address the confusion these reviews describe.",
   },
   {
     label: "Refunds & payments",
     keywords: ["refund", "payment", "wallet", "money not", "deducted", "transaction", "failed payment", "cashback"],
     problem: "Reviews describe failed payments, deducted money, or refunds not received.",
-    opportunity: "Give refund status visibility and self-serve payment recovery requested in reviews.",
+    opportunity: "Give refund status visibility and self-serve payment recovery for the failures these reviews describe.",
   },
   {
     label: "Customer support",
     keywords: ["support", "customer care", "no response", "chatbot", "agent", "helpline", "complaint"],
     problem: "Reviews describe unresponsive or unhelpful support and unresolved complaints.",
-    opportunity: "Offer faster escalation to a human where reviewers explicitly ask for it.",
+    opportunity: "Offer faster escalation to a human for the unresolved complaints these reviews describe.",
   },
   {
     label: "App performance & stability",
     keywords: ["crash", "crashes", "bug", "hangs", "freeze", "lag", "slow app", "not loading", "login issue"],
     problem: "Reviews report crashes, freezes, slowness or sign-in failures in the app.",
-    opportunity: "Prioritise stability work on the flows reviewers name.",
+    opportunity: "Prioritise stability work on the flows these reviews describe failing.",
   },
   {
     label: "Search & discovery",
     keywords: ["search", "filter", "find restaurant", "recommendation", "browse", "sort"],
     problem: "Reviews describe difficulty finding restaurants or dishes through search, filters or sorting.",
-    opportunity: "Extend filters and sorting options that reviewers request by name.",
+    opportunity: "Extend filters and sorting to address the discovery difficulty these reviews describe.",
   },
   {
     label: "Delivery partner experience",
     keywords: ["delivery partner", "rider", "driver", "delivery boy", "rude", "behaviour", "behavior"],
     problem: "Reviews describe negative interactions or conduct issues with delivery partners.",
-    opportunity: "Add partner conduct feedback and follow-up that reviewers ask for.",
+    opportunity: "Add delivery-partner conduct feedback and follow-up for the incidents these reviews describe.",
   },
   {
     label: "Order tracking",
     keywords: ["tracking", "track order", "live location", "map", "status"],
     problem: "Reviews describe inaccurate, stalled or missing order tracking and status updates.",
-    opportunity: "Improve live tracking accuracy and status detail where reviewers request it.",
+    opportunity: "Improve live tracking accuracy and status detail for the gaps these reviews describe.",
   },
 ];
 
@@ -147,7 +147,6 @@ function thresholds(total: number) {
 /** Set once per analyze() call from the dataset size. */
 let MIN_PAIN_EVIDENCE = 3;
 let MIN_TREND_EVIDENCE = 6;
-let MIN_OPPORTUNITY_EVIDENCE = 2;
 let MIN_CHURN_EVIDENCE = 2;
 
 const STOPWORDS = new Set([
@@ -221,7 +220,7 @@ function discoverThemes(reviews: Review[], minCount: number, taken: Set<string>)
       label: term.replace(/\b\w/g, (c) => c.toUpperCase()),
       keywords: [term],
       problem: `Recurring wording in the connected reviews: “${term}” appears in ${Math.round(scaled(n)).toLocaleString()} reviews that read as negative (${(negShare * 100).toFixed(1)}% of the negative reviews sampled).`,
-      opportunity: `Potential opportunity — requires further customer validation: investigate what reviewers describe around “${term}” and address it where they explicitly ask.`,
+      opportunity: `Address what reviewers describe around “${term}” in the connected reviews.`,
     });
     if (kept.length >= MAX_DISCOVERED) break;
   }
@@ -246,11 +245,6 @@ function isNegative(r: Review): boolean {
   if (r.rating !== null) return r.rating <= 3;
   const t = low(r);
   return NEGATIVE_WORDS.some((w) => t.includes(w));
-}
-
-function matches(r: Review, keywords: string[]): boolean {
-  const t = low(r);
-  return keywords.some((k) => t.includes(k));
 }
 
 function firstMatchedKeyword(r: Review, keywords: string[]): string | null {
@@ -359,7 +353,6 @@ export function analyze(reviews: Review[]): Analysis {
   const limits = thresholds(total);
   MIN_PAIN_EVIDENCE = limits.pain;
   MIN_TREND_EVIDENCE = limits.trend;
-  MIN_OPPORTUNITY_EVIDENCE = limits.opportunity;
   MIN_CHURN_EVIDENCE = limits.churn;
 
   const rated = reviews.filter((r) => r.rating !== null) as (Review & { rating: number })[];
@@ -382,7 +375,6 @@ export function analyze(reviews: Review[]): Analysis {
   const churnSet = new Set<string>();
   const churnLabelsByReview = new Map<string, string[]>();
   const requestSet = new Set<string>();
-  const requestReviews: Review[] = [];
 
   for (const r of reviews) {
     const t = low(r);
@@ -401,7 +393,6 @@ export function analyze(reviews: Review[]): Analysis {
     });
     if (OPPORTUNITY_KEYWORDS.some((k) => t.includes(k))) {
       requestSet.add(r.id);
-      requestReviews.push(r);
     }
   }
 
@@ -433,16 +424,8 @@ export function analyze(reviews: Review[]): Analysis {
     .filter((i): i is Insight => i !== null && i.reviewIds.length >= MIN_CHURN_EVIDENCE)
     .sort((a, b) => b.reviewIds.length - a.reviewIds.length);
 
-  const opportunities = themeInsights
-    .map(({ theme, insight }) =>
-      buildInsight(
-        `opp-${insight.id}`,
-        theme.label,
-        requestReviews.filter((r) => matches(r, theme.keywords)),
-      ),
-    )
-    .filter((i): i is Insight => i !== null && i.reviewIds.length >= MIN_OPPORTUNITY_EVIDENCE)
-    .sort((a, b) => b.reviewIds.length - a.reviewIds.length);
+  // Opportunities are derived from the pain points below (see `opportunities`).
+
 
   // Pain points: negative-dominant themes with enough evidence to report.
   const candidates = themeInsights
@@ -485,17 +468,21 @@ export function analyze(reviews: Review[]): Analysis {
             }
           : { evidence: false };
 
-      const oppIds = insight.reviewIds.filter((id) => requestSet.has(id));
-      const oppReviews = matched.filter((r) => requestSet.has(r.id));
-      const opportunity: OpportunityEvidence =
-        oppIds.length >= MIN_OPPORTUNITY_EVIDENCE
-          ? {
-              evidence: true,
-              statement: theme.opportunity,
-              reviewIds: oppIds,
-              excerpts: oppReviews.slice(0, 3).map((r) => excerpt(r, OPPORTUNITY_KEYWORDS)),
-            }
-          : { evidence: false };
+      // Opportunities follow from the pain point itself: any pain point with
+      // enough evidence to report also has enough evidence for a potential,
+      // validation-pending opportunity. Reviews that explicitly ask for
+      // something are preferred as excerpts when they exist, but not required.
+      const requested = matched.filter((r) => requestSet.has(r.id));
+      const oppExcerptSource = requested.length ? requested : excerptSource;
+      const opportunity: OpportunityEvidence = {
+        evidence: true,
+        statement: theme.opportunity,
+        reviewIds: insight.reviewIds,
+        excerpts: oppExcerptSource
+          .slice(0, 3)
+          .map((r) => excerpt(r, requested.length ? OPPORTUNITY_KEYWORDS : theme.keywords)),
+      };
+
 
       return {
         ...insight,
@@ -524,6 +511,20 @@ export function analyze(reviews: Review[]): Analysis {
     score: p.priority.score,
     impact: p.priority.impact,
   }));
+
+  // One potential opportunity per sufficiently evidenced pain point, linked to
+  // that pain point's own supporting review IDs.
+  const opportunities: Insight[] = painPoints
+    .filter((p) => p.opportunity.evidence)
+    .map((p) => ({
+      id: `opp-${p.id}`,
+      label: p.label,
+      reviewIds: p.reviewIds,
+      negativeShare: p.negativeShare,
+      avgRating: p.avgRating,
+    }))
+    .sort((a, b) => b.reviewIds.length - a.reviewIds.length);
+
 
   return {
     kpis: {
