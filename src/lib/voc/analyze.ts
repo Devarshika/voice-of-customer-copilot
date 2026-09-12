@@ -582,6 +582,10 @@ export function analyze(reviews: Review[]): Analysis {
     return { theme, matched, insight, churnIds, churnShare, score };
   });
 
+  // Tracks which problem domains already produced a hypothesis so different
+  // pain points do not collapse into the same intervention wording.
+  const usedDomains = new Set<string>();
+
   const painPoints: PainPoint[] = [...scored]
     .sort((a, b) => b.score - a.score)
     .map((c, index) => {
