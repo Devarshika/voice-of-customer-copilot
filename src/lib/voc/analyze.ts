@@ -357,7 +357,10 @@ function discoverThemes(reviews: Review[], minCount: number, taken: Set<string>)
       label: term.replace(/\b\w/g, (c) => c.toUpperCase()),
       keywords: [term],
       problem: `Recurring wording in the connected reviews: “${term}” appears in ${Math.round(scaled(n)).toLocaleString()} reviews that read as negative (${(negShare * 100).toFixed(1)}% of the negative reviews sampled).`,
-      opportunity: `Reduce the “${term}” friction these reviews describe, in the flows where it keeps coming up.`,
+      // Replaced at analysis time by an intervention hypothesis inferred from
+      // the theme's own matched reviews; empty means "no hypothesis yet".
+      opportunity: "",
+      derived: true,
     });
     if (kept.length >= MAX_DISCOVERED) break;
   }
