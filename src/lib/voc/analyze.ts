@@ -357,7 +357,10 @@ function discoverThemes(reviews: Review[], minCount: number, taken: Set<string>)
       label: term.replace(/\b\w/g, (c) => c.toUpperCase()),
       keywords: [term],
       problem: `Recurring wording in the connected reviews: “${term}” appears in ${Math.round(scaled(n)).toLocaleString()} reviews that read as negative (${(negShare * 100).toFixed(1)}% of the negative reviews sampled).`,
-      opportunity: `Reduce the “${term}” friction these reviews describe, in the flows where it keeps coming up.`,
+      // Replaced at analysis time by an intervention hypothesis inferred from
+      // the theme's own matched reviews; empty means "no hypothesis yet".
+      opportunity: "",
+      derived: true,
     });
     if (kept.length >= MAX_DISCOVERED) break;
   }
@@ -579,6 +582,10 @@ export function analyze(reviews: Review[]): Analysis {
     return { theme, matched, insight, churnIds, churnShare, score };
   });
 
+  // Tracks which problem domains already produced a hypothesis so different
+  // pain points do not collapse into the same intervention wording.
+  const usedDomains = new Set<string>();
+
   const painPoints: PainPoint[] = [...scored]
     .sort((a, b) => b.score - a.score)
     .map((c, index) => {
@@ -605,20 +612,26 @@ export function analyze(reviews: Review[]): Analysis {
             }
           : { evidence: false };
 
-      // Opportunities follow from the pain point itself: any pain point with
-      // enough evidence to report also has enough evidence for a potential,
-      // validation-pending opportunity. Reviews that explicitly ask for
-      // something are preferred as excerpts when they exist, but not required.
+      // The intervention hypothesis is inferred from the wording of this pain
+      // point's own matched reviews. When no problem domain is backed by enough
+      // of those reviews, the opportunity reports insufficient evidence rather
+      // than paraphrasing the pain point name.
       const requested = matched.filter((r) => requestSet.has(r.id));
       const oppExcerptSource = requested.length ? requested : excerptSource;
-      const opportunity: OpportunityEvidence = {
-        evidence: true,
-        statement: theme.opportunity,
-        reviewIds: insight.reviewIds,
-        excerpts: oppExcerptSource
-          .slice(0, 3)
-          .map((r) => excerpt(r, requested.length ? OPPORTUNITY_KEYWORDS : theme.keywords)),
-      };
+      const inferred = theme.derived
+        ? inferIntervention(theme.label.toLowerCase(), matched, usedDomains)
+        : { statement: theme.opportunity, domainId: `curated-${theme.label}` };
+      if (inferred) usedDomains.add(inferred.domainId);
+      const opportunity: OpportunityEvidence = inferred
+        ? {
+            evidence: true,
+            statement: inferred.statement,
+            reviewIds: insight.reviewIds,
+            excerpts: oppExcerptSource
+              .slice(0, 3)
+              .map((r) => excerpt(r, requested.length ? OPPORTUNITY_KEYWORDS : theme.keywords)),
+          }
+        : { evidence: false };
 
 
       return {
