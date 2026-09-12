@@ -608,20 +608,26 @@ export function analyze(reviews: Review[]): Analysis {
             }
           : { evidence: false };
 
-      // Opportunities follow from the pain point itself: any pain point with
-      // enough evidence to report also has enough evidence for a potential,
-      // validation-pending opportunity. Reviews that explicitly ask for
-      // something are preferred as excerpts when they exist, but not required.
+      // The intervention hypothesis is inferred from the wording of this pain
+      // point's own matched reviews. When no problem domain is backed by enough
+      // of those reviews, the opportunity reports insufficient evidence rather
+      // than paraphrasing the pain point name.
       const requested = matched.filter((r) => requestSet.has(r.id));
       const oppExcerptSource = requested.length ? requested : excerptSource;
-      const opportunity: OpportunityEvidence = {
-        evidence: true,
-        statement: theme.opportunity,
-        reviewIds: insight.reviewIds,
-        excerpts: oppExcerptSource
-          .slice(0, 3)
-          .map((r) => excerpt(r, requested.length ? OPPORTUNITY_KEYWORDS : theme.keywords)),
-      };
+      const inferred = theme.derived
+        ? inferIntervention(theme.label.toLowerCase(), matched, usedDomains)
+        : { statement: theme.opportunity, domainId: `curated-${theme.label}` };
+      if (inferred) usedDomains.add(inferred.domainId);
+      const opportunity: OpportunityEvidence = inferred
+        ? {
+            evidence: true,
+            statement: inferred.statement,
+            reviewIds: insight.reviewIds,
+            excerpts: oppExcerptSource
+              .slice(0, 3)
+              .map((r) => excerpt(r, requested.length ? OPPORTUNITY_KEYWORDS : theme.keywords)),
+          }
+        : { evidence: false };
 
 
       return {
