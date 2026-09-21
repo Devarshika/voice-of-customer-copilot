@@ -565,13 +565,14 @@ function churnEvidence(matched: Review[], minEvidence: number): ChurnEvidence {
 }
 
 function buildOpportunity(theme: Theme, insight: Insight, excerpts: Excerpt[]): OpportunityEvidence {
-  const context = theme.context?.replace(/-/g, " ") ?? null;
+  const contextStem = theme.context?.replace(/-/g, " ") ?? null;
   const failureText = theme.failure.replace(/^not-/, "not ").replace(/-/g, " ");
-  if (!context || context === failureText || theme.coherence < 0.45) return { evidence: false };
+  if (!contextStem || contextStem === failureText || theme.coherence < 0.45) return { evidence: false };
   const evidencePhrase = theme.keywords[0];
   if (!evidencePhrase || words(evidencePhrase).length < 2) return { evidence: false };
 
   const phrase = evidencePhrase.replace(/[“”]/g, "");
+  const context = words(phrase).find((word) => stemWord(word) === contextStem) ?? contextStem;
   const statement =
     /slow|delay|late|lag|stuck|freez/.test(failureText)
       ? `Test ways to make ${context} faster and more predictable, with progress or delay visibility when the recurring “${phrase}” condition occurs.`
@@ -600,8 +601,6 @@ export function analyze(reviews: Review[]): Analysis {
   const limits = thresholds(total);
   const time = buildTimeContext(reviews);
   const themes = discoverThemes(reviews, limits.pain);
-  const maxMentions = Math.max(...themes.map((theme) => theme.matched.length), 1);
-
   const unranked = themes.map((theme) => {
     const insight = buildInsight(`theme-${theme.id}`, theme.label, theme.matched);
     if (!insight) return null;
@@ -622,21 +621,6 @@ export function analyze(reviews: Review[]): Analysis {
       ratedCount,
     );
 
-    const volumeFactor = Math.log1p(insight.reviewIds.length) / Math.log1p(maxMentions);
-    const negativeFactor = insight.negativeShare;
-    const trendFactor = trend.evidence && trend.changePct !== null
-      ? Math.max(0, Math.min(1, trend.changePct / 100))
-      : 0;
-    const qualityFactor = Math.min(1, theme.coherence);
-    const severityFactor = Math.min(1, theme.severityShare);
-    const score = Math.round(
-      (volumeFactor * 0.35 +
-        negativeFactor * 0.25 +
-        trendFactor * 0.15 +
-        qualityFactor * 0.15 +
-        severityFactor * 0.1) *
-        100,
-    );
     const opportunity = buildOpportunity(theme, insight, excerpts);
 
     return {
@@ -647,15 +631,39 @@ export function analyze(reviews: Review[]): Analysis {
       churn,
       excerpts,
       confidence,
-      score,
-      factors: { volumeFactor, negativeFactor, trendFactor, qualityFactor, severityFactor },
+      rawFactors: {
+        volume: insight.reviewIds.length,
+        negative: insight.negativeShare,
+        trend: trend.evidence && trend.changePct !== null ? Math.max(0, trend.changePct) : 0,
+        quality: theme.coherence,
+        severity: theme.severityShare,
+      },
       opportunity,
     };
   }).filter((item): item is NonNullable<typeof item> => item !== null);
 
-  unranked.sort((a, b) => b.score - a.score || b.insight.reviewIds.length - a.insight.reviewIds.length);
+  const percentile = (value: number, values: number[]) => {
+    if (values.length <= 1) return value > 0 ? 1 : 0;
+    const below = values.filter((candidate) => candidate < value).length;
+    const equal = values.filter((candidate) => candidate === value).length;
+    return (below + Math.max(0, equal - 1) / 2) / (values.length - 1);
+  };
+  const factorKeys = ["volume", "negative", "trend", "quality", "severity"] as const;
+  const factorValues = Object.fromEntries(
+    factorKeys.map((key) => [key, unranked.map((item) => item.rawFactors[key])]),
+  ) as Record<(typeof factorKeys)[number], number[]>;
+  const ranked = unranked.map((item) => {
+    const factors = Object.fromEntries(
+      factorKeys.map((key) => [key, percentile(item.rawFactors[key], factorValues[key])]),
+    ) as Record<(typeof factorKeys)[number], number>;
+    const score = Math.round(
+      (factorKeys.reduce((sum, key) => sum + factors[key], 0) / factorKeys.length) * 100,
+    );
+    return { ...item, factors, score };
+  });
+  ranked.sort((a, b) => b.score - a.score || b.insight.reviewIds.length - a.insight.reviewIds.length);
 
-  const painPoints: PainPoint[] = unranked.map((item, index) => ({
+  const painPoints: PainPoint[] = ranked.map((item, index) => ({
     ...item.insight,
     description: item.theme.problem,
     keywords: item.theme.keywords,
@@ -668,8 +676,8 @@ export function analyze(reviews: Review[]): Analysis {
     priority: {
       score: item.score,
       rank: index + 1,
-      impact: item.score >= 70 ? "High" : item.score >= 45 ? "Medium" : "Low",
-      rationale: `Evidence factors: volume ${Math.round(item.factors.volumeFactor * 100)}/100, negative rating share ${Math.round(item.factors.negativeFactor * 100)}/100, comparable-period trend ${Math.round(item.factors.trendFactor * 100)}/100, cluster consistency ${Math.round(item.factors.qualityFactor * 100)}/100, and severity evidence ${Math.round(item.factors.severityFactor * 100)}/100.`,
+      impact: index < Math.ceil(ranked.length / 3) ? "High" : index < Math.ceil((ranked.length * 2) / 3) ? "Medium" : "Low",
+      rationale: `Equal-weight evidence ranks within this dataset: volume ${Math.round(item.factors.volume * 100)}/100, negative rating share ${Math.round(item.factors.negative * 100)}/100, comparable-period trend ${Math.round(item.factors.trend * 100)}/100, cluster consistency ${Math.round(item.factors.quality * 100)}/100, and severity evidence ${Math.round(item.factors.severity * 100)}/100.`,
     },
     opportunity: item.opportunity,
   }));
