@@ -47,6 +47,7 @@ const ID_KEYS = ["review_id", "id"];
 const DATE_KEYS = ["date", "review_date", "review_timestamp", "created_at", "timestamp", "time", "at"];
 const RATING_KEYS = ["rating", "review_rating", "stars", "score", "star_rating"];
 const SOURCE_KEYS = ["source", "platform", "channel", "app"];
+const EXTRA_MAPPED_KEYS = ["review_likes", "author_app_version"];
 
 function toReview(obj: Record<string, string>, index: number): Review | null {
   const text = pick(obj, TEXT_KEYS);
@@ -56,7 +57,14 @@ function toReview(obj: Record<string, string>, index: number): Review | null {
   const rawRating = pick(obj, RATING_KEYS);
   const rating = rawRating !== null && rawRating !== "" ? Number(rawRating) : NaN;
 
-  const used = new Set([...ID_KEYS, ...TEXT_KEYS, ...DATE_KEYS, ...RATING_KEYS, ...SOURCE_KEYS]);
+  const used = new Set([
+    ...ID_KEYS,
+    ...TEXT_KEYS,
+    ...DATE_KEYS,
+    ...RATING_KEYS,
+    ...SOURCE_KEYS,
+    ...EXTRA_MAPPED_KEYS,
+  ]);
   const extra: Record<string, string> = {};
   for (const [k, v] of Object.entries(obj)) {
     if (!used.has(k.toLowerCase().trim()) && v?.trim()) extra[k] = v.trim();
