@@ -6,4 +6,4 @@
 - [x] AI Evaluation runs on the currently selected dataset, no stale results
 - [x] Verified on a 1,000-review file (18 pain points, evaluation Pass) and the large dataset (21 insights)
 - [x] Make the uploaded Uber Reviews file the default dataset with exact field mapping
-- [ ] Replace fixed topic matching with dataset-agnostic complaint clustering and verify across unrelated datasets
+- [x] Replace fixed topic matching with dataset-agnostic complaint clustering and verify across unrelated datasets
