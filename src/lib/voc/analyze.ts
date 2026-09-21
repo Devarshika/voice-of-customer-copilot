@@ -33,143 +33,7 @@ type Theme = {
   problem: string;
   /** Statement of the opportunity, derived from the problem the theme describes. */
   opportunity: string;
-  /**
-   * True for themes mined from the connected review wording. Their intervention
-   * hypothesis is inferred from the matched reviews at analysis time instead of
-   * being written in advance.
-   */
-  derived?: boolean;
 };
-
-/**
- * Generic problem domains used to turn a discovered theme into a concrete
- * product intervention hypothesis. A domain is only used when enough of the
- * theme's own matched reviews contain its wording, so the hypothesis always
- * follows evidence in the connected dataset rather than the theme's name.
- */
-type Domain = {
-  id: string;
-  cues: string[];
-  /** Intervention hypothesis; `term` is the theme's own recurring wording. */
-  intervention: (term: string) => string;
-};
-
-const DOMAINS: Domain[] = [
-  {
-    id: "speed",
-    cues: ["slow", "lag", "laggy", "loading", "load", "takes forever", "freeze", "hang", "sluggish", "buffering", "long time"],
-    intervention: (t) =>
-      `Improve responsiveness where “${t}” shows up: faster loading and progressive rendering on the slowest screens in the flow.`,
-  },
-  {
-    id: "wait",
-    cues: ["late", "delay", "delayed", "waiting", "wait", "eta", "on time", "never arrived", "took hours", "took an hour"],
-    intervention: (t) =>
-      `Make timing promises accurate and proactively notify people when an order or request tied to “${t}” is at risk of running late.`,
-  },
-  {
-    id: "payment",
-    cues: ["refund", "money", "charged", "charge", "payment", "paid", "billing", "deducted", "invoice", "wallet", "transaction"],
-    intervention: (t) =>
-      `Build a self-serve payment recovery and refund-status flow so people hitting “${t}” can see and resolve the transaction without contacting anyone.`,
-  },
-  {
-    id: "support",
-    cues: ["support", "customer care", "customer service", "no response", "no reply", "chat", "agent", "helpline", "complaint", "escalat"],
-    intervention: (t) =>
-      `Shorten the resolution path behind “${t}”: clear case status, guaranteed response windows, and fast escalation to a person.`,
-  },
-  {
-    id: "reliability",
-    cues: ["crash", "crashes", "bug", "error", "not working", "doesn't work", "glitch", "logged out", "stuck", "fail", "failed"],
-    intervention: (t) =>
-      `Harden the flows where “${t}” occurs: fix the failing steps, add safe retries, and recover state instead of dropping the session.`,
-  },
-  {
-    id: "usability",
-    cues: ["confusing", "confused", "hard to", "difficult", "can't find", "cannot find", "search", "filter", "navigate", "interface", "layout", "unclear"],
-    intervention: (t) =>
-      `Rework the step where “${t}” appears so the next action is obvious: clearer labelling, better search and filtering, fewer detours.`,
-  },
-  {
-    id: "quality",
-    cues: ["quality", "cold", "stale", "spoiled", "taste", "damaged", "broken", "defect", "worst quality", "poor quality"],
-    intervention: (t) =>
-      `Add quality checks and a fast make-good path for the “${t}” cases, so a bad outcome is caught before or right after it reaches the customer.`,
-  },
-  {
-    id: "accuracy",
-    cues: ["wrong", "missing", "incorrect", "different item", "not what", "instead of", "mismatch", "incomplete"],
-    intervention: (t) =>
-      `Verify what is fulfilled against what was requested, and give one-tap reporting plus immediate resolution for the “${t}” mismatches.`,
-  },
-  {
-    id: "price",
-    cues: ["expensive", "overpriced", "price", "cost", "hidden charge", "extra charge", "fee", "coupon", "discount", "offer not"],
-    intervention: (t) =>
-      `Make pricing and offer rules explicit before confirmation so the “${t}” surprises disappear at the point of decision.`,
-  },
-  {
-    id: "conduct",
-    cues: ["rude", "behaviour", "behavior", "staff", "driver", "delivery boy", "unprofessional", "attitude", "argue"],
-    intervention: (t) =>
-      `Close the loop on conduct: in-flow reporting for “${t}” incidents, follow-up with the person involved, and visible outcomes for the customer.`,
-  },
-  {
-    id: "communication",
-    cues: ["no update", "no information", "not informed", "no notification", "tracking", "status", "no communication", "never told"],
-    intervention: (t) =>
-      `Keep people informed through the “${t}” moments: accurate status, timely notifications, and an honest reason when something changes.`,
-  },
-  {
-    id: "availability",
-    cues: ["unavailable", "out of stock", "cancelled", "cancel", "not available", "closed", "sold out", "rejected"],
-    intervention: (t) =>
-      `Show real availability before commitment and offer immediate alternatives when a “${t}” situation forces a cancellation.`,
-  },
-  {
-    id: "trust",
-    cues: ["cheat", "fraud", "scam", "misleading", "lie", "false", "fake"],
-    intervention: (t) =>
-      `Remove the mismatch between what is promised and what is delivered in the “${t}” cases, and make the terms verifiable in the product.`,
-  },
-];
-
-/** Minimum share of a theme's matched reviews that must contain a domain's wording. */
-const MIN_DOMAIN_SHARE = 0.12;
-/** Minimum absolute matched reviews backing an inferred intervention. */
-const MIN_DOMAIN_COUNT = 3;
-
-/**
- * Infer an intervention hypothesis for a discovered theme from the wording of
- * its own matched reviews. Returns null when no problem domain is supported
- * strongly enough — the caller then reports insufficient evidence.
- */
-function inferIntervention(
-  term: string,
-  matched: Review[],
-  used: Set<string>,
-): { statement: string; domainId: string } | null {
-  const sample = matched.length > 2000 ? matched.slice(0, 2000) : matched;
-  if (sample.length === 0) return null;
-
-  const scored = DOMAINS.map((d) => {
-    let hits = 0;
-    for (const r of sample) {
-      const t = low(r);
-      if (d.cues.some((c) => t.includes(c))) hits += 1;
-    }
-    return { domain: d, hits, share: hits / sample.length };
-  })
-    .filter((s) => s.hits >= MIN_DOMAIN_COUNT && s.share >= MIN_DOMAIN_SHARE)
-    .sort((a, b) => b.share - a.share);
-
-  // Prefer a domain not already used, so different pain points yield
-  // meaningfully different hypotheses rather than one repeated sentence.
-  const pick = scored.find((s) => !used.has(s.domain.id)) ?? scored[0];
-  if (!pick) return null;
-  return { statement: pick.domain.intervention(term), domainId: pick.domain.id };
-}
 
 const LEXICON_THEMES: Theme[] = [
 
@@ -357,10 +221,7 @@ function discoverThemes(reviews: Review[], minCount: number, taken: Set<string>)
       label: term.replace(/\b\w/g, (c) => c.toUpperCase()),
       keywords: [term],
       problem: `Recurring wording in the connected reviews: “${term}” appears in ${Math.round(scaled(n)).toLocaleString()} reviews that read as negative (${(negShare * 100).toFixed(1)}% of the negative reviews sampled).`,
-      // Replaced at analysis time by an intervention hypothesis inferred from
-      // the theme's own matched reviews; empty means "no hypothesis yet".
-      opportunity: "",
-      derived: true,
+      opportunity: `Reduce the “${term}” friction these reviews describe, in the flows where it keeps coming up.`,
     });
     if (kept.length >= MAX_DISCOVERED) break;
   }
@@ -582,10 +443,6 @@ export function analyze(reviews: Review[]): Analysis {
     return { theme, matched, insight, churnIds, churnShare, score };
   });
 
-  // Tracks which problem domains already produced a hypothesis so different
-  // pain points do not collapse into the same intervention wording.
-  const usedDomains = new Set<string>();
-
   const painPoints: PainPoint[] = [...scored]
     .sort((a, b) => b.score - a.score)
     .map((c, index) => {
@@ -612,26 +469,20 @@ export function analyze(reviews: Review[]): Analysis {
             }
           : { evidence: false };
 
-      // The intervention hypothesis is inferred from the wording of this pain
-      // point's own matched reviews. When no problem domain is backed by enough
-      // of those reviews, the opportunity reports insufficient evidence rather
-      // than paraphrasing the pain point name.
+      // Opportunities follow from the pain point itself: any pain point with
+      // enough evidence to report also has enough evidence for a potential,
+      // validation-pending opportunity. Reviews that explicitly ask for
+      // something are preferred as excerpts when they exist, but not required.
       const requested = matched.filter((r) => requestSet.has(r.id));
       const oppExcerptSource = requested.length ? requested : excerptSource;
-      const inferred = theme.derived
-        ? inferIntervention(theme.label.toLowerCase(), matched, usedDomains)
-        : { statement: theme.opportunity, domainId: `curated-${theme.label}` };
-      if (inferred) usedDomains.add(inferred.domainId);
-      const opportunity: OpportunityEvidence = inferred
-        ? {
-            evidence: true,
-            statement: inferred.statement,
-            reviewIds: insight.reviewIds,
-            excerpts: oppExcerptSource
-              .slice(0, 3)
-              .map((r) => excerpt(r, requested.length ? OPPORTUNITY_KEYWORDS : theme.keywords)),
-          }
-        : { evidence: false };
+      const opportunity: OpportunityEvidence = {
+        evidence: true,
+        statement: theme.opportunity,
+        reviewIds: insight.reviewIds,
+        excerpts: oppExcerptSource
+          .slice(0, 3)
+          .map((r) => excerpt(r, requested.length ? OPPORTUNITY_KEYWORDS : theme.keywords)),
+      };
 
 
       return {

@@ -43,9 +43,11 @@ const pick = (obj: Record<string, string>, names: string[]) => {
 };
 
 const TEXT_KEYS = ["review", "review_text", "text", "content", "comment", "body", "feedback"];
-const DATE_KEYS = ["date", "review_date", "created_at", "timestamp", "time", "at"];
-const RATING_KEYS = ["rating", "stars", "score", "star_rating"];
+const ID_KEYS = ["review_id", "id"];
+const DATE_KEYS = ["date", "review_date", "review_timestamp", "created_at", "timestamp", "time", "at"];
+const RATING_KEYS = ["rating", "review_rating", "stars", "score", "star_rating"];
 const SOURCE_KEYS = ["source", "platform", "channel", "app"];
+const EXTRA_MAPPED_KEYS = ["review_likes", "author_app_version"];
 
 function toReview(obj: Record<string, string>, index: number): Review | null {
   const text = pick(obj, TEXT_KEYS);
@@ -55,14 +57,25 @@ function toReview(obj: Record<string, string>, index: number): Review | null {
   const rawRating = pick(obj, RATING_KEYS);
   const rating = rawRating !== null && rawRating !== "" ? Number(rawRating) : NaN;
 
-  const used = new Set([...TEXT_KEYS, ...DATE_KEYS, ...RATING_KEYS, ...SOURCE_KEYS]);
+  const used = new Set([
+    ...ID_KEYS,
+    ...TEXT_KEYS,
+    ...DATE_KEYS,
+    ...RATING_KEYS,
+    ...SOURCE_KEYS,
+    ...EXTRA_MAPPED_KEYS,
+  ]);
   const extra: Record<string, string> = {};
   for (const [k, v] of Object.entries(obj)) {
     if (!used.has(k.toLowerCase().trim()) && v?.trim()) extra[k] = v.trim();
   }
+  const likes = pick(obj, ["review_likes"]);
+  const appVersion = pick(obj, ["author_app_version"]);
+  if (likes !== null) extra["Helpful/likes"] = likes;
+  if (appVersion !== null) extra["App version"] = appVersion;
 
   return {
-    id: `r-${index}`,
+    id: pick(obj, ID_KEYS) ?? `r-${index}`,
     text,
     date: parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate.toISOString() : null,
     rating: Number.isFinite(rating) && rating > 0 ? Math.min(5, Math.round(rating)) : null,

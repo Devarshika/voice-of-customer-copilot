@@ -6,7 +6,7 @@ import { InsightsPanel } from "@/components/voc/InsightsPanel";
 
 import { ReviewFeed, type FeedFilters } from "@/components/voc/ReviewFeed";
 import { analyze } from "@/lib/voc/analyze";
-import { DEFAULT_DATASETS, ZOMATO_DATASET_ID, loadZomatoReviews } from "@/lib/voc/datasets";
+import { DEFAULT_DATASET_ID, DEFAULT_DATASETS, loadDefaultReviews } from "@/lib/voc/datasets";
 import { parseReviewFile } from "@/lib/voc/parse";
 import type { Dataset, Insight } from "@/lib/voc/types";
 
@@ -41,21 +41,21 @@ function Dashboard() {
 
   useEffect(() => {
     let cancelled = false;
-    loadZomatoReviews()
+    loadDefaultReviews()
       .then((reviews) => {
         if (cancelled) return;
         setDatasets((prev) =>
           prev.map((d) =>
-            d.id === ZOMATO_DATASET_ID ? { ...d, status: "loaded", reviews } : d,
+            d.id === DEFAULT_DATASET_ID ? { ...d, status: "loaded", reviews } : d,
           ),
         );
       })
       .catch(() => {
         if (cancelled) return;
         setDatasets((prev) =>
-          prev.map((d) => (d.id === ZOMATO_DATASET_ID ? { ...d, status: "empty" } : d)),
+          prev.map((d) => (d.id === DEFAULT_DATASET_ID ? { ...d, status: "empty" } : d)),
         );
-        setError("Could not load the connected Zomato review file.");
+        setError("Could not load the connected Uber review file.");
       });
     return () => {
       cancelled = true;
