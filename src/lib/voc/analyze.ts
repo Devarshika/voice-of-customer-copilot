@@ -14,533 +14,736 @@ import type {
 } from "./types";
 
 /**
- * Themes come from two places, both grounded in the connected review text:
+ * Dataset-agnostic, deterministic complaint discovery.
  *
- * 1. Discovery — recurring words/phrases mined from the negative reviews of the
- *    dataset that is actually loaded. This is what makes the engine work on any
- *    uploaded file, with no domain assumptions.
- * 2. An optional generic lexicon of common product-feedback themes, kept only
- *    when the loaded reviews actually contain that wording.
- *
- * A theme with too few matched reviews for the size of the dataset never
- * appears, and every derived field is computed from matched reviews or reported
- * as insufficient evidence.
+ * The engine contains no product areas, brands, entities, or predefined pain
+ * points. It discovers recurring problem expressions from the selected review
+ * text, joins variants only when their evidence overlaps, and keeps the exact
+ * supporting review IDs throughout the pipeline.
  */
-type Theme = {
-  label: string;
-  keywords: string[];
-  /** Neutral description of the problem the matched wording describes. */
-  problem: string;
-  /** Statement of the opportunity, derived from the problem the theme describes. */
-  opportunity: string;
+
+type Token = { value: string; stem: string; index: number };
+
+type Signal = {
+  key: string;
+  phrase: string;
+  context: string | null;
+  failure: string;
+  severity: boolean;
 };
 
-const LEXICON_THEMES: Theme[] = [
+type SignalGroup = {
+  key: string;
+  context: string | null;
+  failure: string;
+  reviewIds: Set<string>;
+  phrases: Map<string, number>;
+  severeIds: Set<string>;
+};
 
+type Cluster = {
+  groups: SignalGroup[];
+  reviewIds: Set<string>;
+};
+
+type Theme = {
+  id: string;
+  label: string;
+  keywords: string[];
+  problem: string;
+  context: string | null;
+  failure: string;
+  coherence: number;
+  severityShare: number;
+  matched: Review[];
+};
+
+const WORDS = /[\p{L}\p{N}']+/gu;
+
+// Function words and broad feedback vocabulary are linguistic filters, not
+// product categories. Dataset-common tokens are also removed dynamically.
+const STOPWORDS = new Set([
+  "a","about","after","again","all","also","am","an","and","any","are","as","at","be","because","been","before","being","both","but","by","can","could","did","do","does","doing","during","each","even","ever","few","for","from","get","gets","getting","give","given","had","has","have","having","he","her","here","hers","herself","him","himself","his","how","i","if","in","into","is","it","its","itself","just","many","may","me","might","more","most","much","my","myself","no","nor","not","of","off","on","once","only","or","other","our","ours","out","over","own","same","she","should","so","some","such","than","that","the","their","theirs","them","themselves","then","there","these","they","this","those","through","to","too","under","until","up","us","very","was","we","were","what","when","where","which","while","who","why","will","with","would","you","your","yours",
+]);
+
+const BROAD_CONTEXT = new Set([
+  "able","app","application","brand","business","company","customer","customers","experience","find","good","keep","know","let","one","platform","product","products","select","service","services","system","thing","things","use","user","users","want","way","went","work",
+]);
+
+// Generic expressions of failure or friction. These identify complaint
+// language; they do not define what the complaint is about.
+const PROBLEM_STEMS = new Set([
+  "annoy","awful","bad","block","broke","broken","cancel","confus","crash","delay","difficult","disappoint","error","expens","fail","fault","freez","frustrat","hard","hate","horribl","incorrect","issue","lag","late","lost","miss","poor","problem","refund","reject","ridicul","rude","scam","slow","spam","stuck","terribl","unaccept","unavail","unsafe","useless","waste","wrong","worst",
+]);
+
+const SEVERE_STEMS = new Set([
+  "awful","crash","fail","fraud","horribl","scam","stuck","terribl","unaccept","unsafe","useless","waste","worst",
+]);
+
+const NEGATIONS = new Set([
+  "can't","cannot","cant","couldn't","couldnt","doesn't","doesnt","don't","dont","never","no","not","unable","won't","wont","wouldn't","wouldnt",
+]);
+
+const INTENSIFIERS = new Set([
+  "absolutely","always","constantly","extremely","frequently","really","repeatedly","seriously","totally",
+]);
+
+const CHURN_PATTERNS: { label: string; patterns: RegExp[] }[] = [
   {
-    label: "Delivery speed & reliability",
-    keywords: ["late", "delay", "delayed", "slow delivery", "took an hour", "waiting", "eta", "on time", "never arrived", "delivery time"],
-    problem: "Reviews describe orders arriving later than promised, long waits, or deliveries that never arrived.",
-    opportunity: "Tighten delivery-time promises and proactively communicate delays for the orders these reviews describe.",
+    label: "Explicit intent to stop using the product",
+    patterns: [
+      /\b(?:stop|quit) (?:using|buying|ordering|paying)\b/i,
+      /\b(?:won't|wont|will not|never) (?:use|buy|order|return)\b/i,
+      /\b(?:uninstall|deleting|delete|deleted) (?:this |the )?(?:app|account)\b/i,
+      /\b(?:done with|not coming back|no longer using|last time using)\b/i,
+    ],
   },
   {
-    label: "Food quality & freshness",
-    keywords: ["cold", "stale", "quality", "tasteless", "spoiled", "soggy", "fresh", "burnt", "raw"],
-    problem: "Reviews report food arriving cold, stale, soggy or otherwise below expected quality.",
-    opportunity: "Add quality safeguards and food-condition checks targeting the problems these reviews describe.",
+    label: "Switching to an alternative",
+    patterns: [
+      /\b(?:switching|switched|moving|moved|going) to (?:another|a different|an alternative|a competitor)\b/i,
+      /\b(?:use|using) .{1,35} instead\b/i,
+      /\bbetter alternative\b/i,
+    ],
   },
   {
-    label: "Order accuracy & missing items",
-    keywords: ["missing", "wrong order", "wrong item", "incomplete", "not delivered", "different item"],
-    problem: "Reviews describe missing items, wrong items, or incomplete orders.",
-    opportunity: "Introduce order verification and fast missing-item resolution for the failures these reviews describe.",
+    label: "Cancellation or account exit intent",
+    patterns: [
+      /\b(?:cancel|close|delete) (?:my |the )?(?:subscription|membership|account)\b/i,
+      /\b(?:unsubscribe|terminate my account)\b/i,
+    ],
   },
   {
-    label: "Packaging & spillage",
-    keywords: ["packaging", "spilled", "leaked", "leaking", "crushed", "container"],
-    problem: "Reviews report leaking, spilled or crushed packaging on arrival.",
-    opportunity: "Set packaging standards for the spill-prone items these reviews describe.",
-  },
-  {
-    label: "Pricing, charges & coupons",
-    keywords: ["expensive", "price", "pricing", "charges", "surge", "coupon", "offer", "discount", "overcharged", "delivery fee"],
-    problem: "Reviews question prices, added charges, or coupons and offers not applying as expected.",
-    opportunity: "Make charges and coupon rules explicit at checkout to address the confusion these reviews describe.",
-  },
-  {
-    label: "Refunds & payments",
-    keywords: ["refund", "payment", "wallet", "money not", "deducted", "transaction", "failed payment", "cashback"],
-    problem: "Reviews describe failed payments, deducted money, or refunds not received.",
-    opportunity: "Give refund status visibility and self-serve payment recovery for the failures these reviews describe.",
-  },
-  {
-    label: "Customer support",
-    keywords: ["support", "customer care", "no response", "chatbot", "agent", "helpline", "complaint"],
-    problem: "Reviews describe unresponsive or unhelpful support and unresolved complaints.",
-    opportunity: "Offer faster escalation to a human for the unresolved complaints these reviews describe.",
-  },
-  {
-    label: "App performance & stability",
-    keywords: ["crash", "crashes", "bug", "hangs", "freeze", "lag", "slow app", "not loading", "login issue"],
-    problem: "Reviews report crashes, freezes, slowness or sign-in failures in the app.",
-    opportunity: "Prioritise stability work on the flows these reviews describe failing.",
-  },
-  {
-    label: "Search & discovery",
-    keywords: ["search", "filter", "find restaurant", "recommendation", "browse", "sort"],
-    problem: "Reviews describe difficulty finding restaurants or dishes through search, filters or sorting.",
-    opportunity: "Extend filters and sorting to address the discovery difficulty these reviews describe.",
-  },
-  {
-    label: "Delivery partner experience",
-    keywords: ["delivery partner", "rider", "driver", "delivery boy", "rude", "behaviour", "behavior"],
-    problem: "Reviews describe negative interactions or conduct issues with delivery partners.",
-    opportunity: "Add delivery-partner conduct feedback and follow-up for the incidents these reviews describe.",
-  },
-  {
-    label: "Order tracking",
-    keywords: ["tracking", "track order", "live location", "map", "status"],
-    problem: "Reviews describe inaccurate, stalled or missing order tracking and status updates.",
-    opportunity: "Improve live tracking accuracy and status detail for the gaps these reviews describe.",
+    label: "Repeated unresolved dissatisfaction",
+    patterns: [
+      /\b(?:every time|again and again|repeatedly|multiple times|third time)\b.{0,80}\b(?:fail|problem|issue|wrong|broken|unresolved|not fixed)\b/i,
+      /\b(?:still not fixed|never gets resolved|keeps happening)\b/i,
+    ],
   },
 ];
 
-/**
- * Churn wording is deliberately product-agnostic: it looks for the customer
- * stating they will stop, cancel, or move elsewhere, or expressing severe
- * repeated dissatisfaction. No competitor or vertical is assumed.
- */
-const CHURN_RULES: { label: string; keywords: string[] }[] = [
-  { label: "Explicit intent to stop using the product", keywords: ["uninstall", "deleting the app", "delete the app", "deleted the app", "never again", "never order", "never buy", "never use", "last time", "stop using", "won't use", "will not use", "not coming back", "done with", "no longer use"] },
-  { label: "Switching to an alternative", keywords: ["switch", "switching", "switched", "competitor", "better app", "better alternative", "moved to", "moving to", "going elsewhere", "somewhere else", "instead of"] },
-  { label: "Long-tenure customer expressing decline", keywords: ["used to be", "loyal", "gone downhill", "getting worse", "declined", "not what it used to", "years of using"] },
-  { label: "Cancellation & refund escalation", keywords: ["cancel", "cancelled", "canceled", "cancelling", "unsubscribe", "refund not", "no refund", "chargeback", "want my money back"] },
-  { label: "Severe repeated dissatisfaction", keywords: ["every time", "again and again", "repeatedly", "still not fixed", "third time", "multiple times", "worst experience", "waste of money"] },
-];
-
-const OPPORTUNITY_KEYWORDS = [
-  "wish", "should add", "please add", "would be great", "hope you", "suggest", "feature request",
-  "would love", "needs an option", "add an option", "allow us", "why can't", "why cant",
-  "should have", "please fix", "needs to", "it would help", "request you",
-];
-
-const NEGATIVE_WORDS = [
-  "bad", "worst", "terrible", "awful", "poor", "horrible", "disappointed", "disappointing",
-  "hate", "useless", "never", "problem", "issue", "annoying", "frustrating", "pathetic", "waste",
-  "broken", "unacceptable", "rude", "slow", "failed", "error", "complaint", "unhappy",
-];
-
-/**
- * Evidence thresholds scale with the size of the connected dataset, so a
- * 1,000-review file is analysed the same way a 100,000-review file is.
- */
 function thresholds(total: number) {
-  const share = (pct: number, floor: number) =>
-    Math.max(floor, Math.round((total * pct) / 100));
+  const root = Math.sqrt(Math.max(total, 1));
   return {
-    pain: Math.min(share(0.5, 3), 200),
-    trend: Math.min(share(0.6, 6), 300),
-    opportunity: Math.min(share(0.2, 2), 100),
-    churn: Math.min(share(0.2, 2), 100),
+    pain: Math.max(3, Math.min(120, Math.round(root * 0.42))),
+    trend: Math.max(6, Math.min(180, Math.round(root * 0.55))),
+    churn: Math.max(2, Math.min(80, Math.round(root * 0.18))),
   };
 }
 
-/** Set once per analyze() call from the dataset size. */
-let MIN_PAIN_EVIDENCE = 3;
-let MIN_TREND_EVIDENCE = 6;
-let MIN_CHURN_EVIDENCE = 2;
-
-const STOPWORDS = new Set([
-  "the","a","an","and","or","but","if","then","than","that","this","these","those","is","are","was","were","be","been","being","am","do","does","did","doing","have","has","had","having","i","me","my","we","our","you","your","he","she","it","its","they","them","their","of","in","on","at","to","for","with","from","by","as","about","into","over","after","before","up","down","out","off","again","very","so","just","too","also","not","no","nor","only","own","same","such","can","cant","will","would","should","could","may","might","must","there","here","when","where","why","how","what","which","who","whom","all","any","both","each","few","more","most","other","some","one","two","get","got","get","really","much","many","because","while","during","still","even","ever","never","always","use","used","using","app","order","orders","ordered","time","times","good","great","nice","best","like","love","thank","thanks","please","dont","doesnt","didnt","im","ive","was","were","us","he's","made","make","went","give","given","take","taken","now","back","first","last","next","don","t","s","re","ll","ve","m","d",
-]);
-
-/** Reviews scanned when mining recurring wording (deterministic prefix). */
-const DISCOVERY_SAMPLE = 20000;
-/** Maximum discovered themes kept. */
-const MAX_DISCOVERED = 12;
-
-function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9' ]+/g, " ")
-    .split(/\s+/)
-    .filter((w) => w.length > 2 && w.length < 24 && !STOPWORDS.has(w));
+function stemWord(word: string): string {
+  let value = word.toLowerCase().replace(/^'+|'+$/g, "");
+  if (value.length > 6 && value.endsWith("ingly")) value = value.slice(0, -5);
+  else if (value.length > 5 && value.endsWith("edly")) value = value.slice(0, -4);
+  else if (value.length > 5 && value.endsWith("ing")) value = value.slice(0, -3);
+  else if (value.length > 4 && value.endsWith("ied")) value = `${value.slice(0, -3)}y`;
+  else if (value.length > 4 && value.endsWith("ed")) value = value.slice(0, -2);
+  else if (value.length > 4 && value.endsWith("es")) value = value.slice(0, -2);
+  else if (value.length > 3 && value.endsWith("s")) value = value.slice(0, -1);
+  if (value === "cancell") value = "cancel";
+  return value;
 }
 
-/**
- * Mine recurring words and phrases from the negative reviews of the connected
- * dataset. Each surviving term becomes a theme whose evidence is, by
- * construction, the reviews that literally contain that term.
- */
-function discoverThemes(reviews: Review[], minCount: number, taken: Set<string>): Theme[] {
-  const sample = reviews.length > DISCOVERY_SAMPLE ? reviews.slice(0, DISCOVERY_SAMPLE) : reviews;
-  const negDf = new Map<string, number>();
-  const allDf = new Map<string, number>();
-  let negTotal = 0;
+function words(text: string): string[] {
+  return (text.toLowerCase().match(WORDS) ?? []).filter(Boolean);
+}
 
-  for (const r of sample) {
-    const negative = isNegative(r);
-    if (negative) negTotal += 1;
-    const words = tokenize(r.text);
-    const seen = new Set<string>();
-    for (let i = 0; i < words.length; i++) {
-      seen.add(words[i]!);
-      if (i + 1 < words.length) seen.add(`${words[i]} ${words[i + 1]}`);
-    }
-    for (const term of seen) {
-      allDf.set(term, (allDf.get(term) ?? 0) + 1);
-      if (negative) negDf.set(term, (negDf.get(term) ?? 0) + 1);
+function tokens(text: string): Token[] {
+  return words(text).map((value, index) => ({ value, stem: stemWord(value), index }));
+}
+
+function isProblemToken(token: Token): boolean {
+  return PROBLEM_STEMS.has(token.stem) || [...PROBLEM_STEMS].some((s) => token.stem.startsWith(s));
+}
+
+function hasProblemLanguage(text: string): boolean {
+  const list = tokens(text);
+  return list.some(isProblemToken) || list.some((t, i) => NEGATIONS.has(t.value) && !!list[i + 1]);
+}
+
+function isTextNegative(review: Review): boolean {
+  return hasProblemLanguage(review.text);
+}
+
+function isComplaintReview(review: Review): boolean {
+  return (review.rating !== null && review.rating <= 3) || isTextNegative(review);
+}
+
+function reviewNegativeShare(reviews: Review[]): { share: number; basis: "ratings" | "language"; rated: number } {
+  const rated = reviews.filter((r): r is Review & { rating: number } => r.rating !== null);
+  if (rated.length > 0) {
+    return {
+      share: rated.filter((r) => r.rating <= 2).length / rated.length,
+      basis: "ratings",
+      rated: rated.length,
+    };
+  }
+  return {
+    share: reviews.length ? reviews.filter(isTextNegative).length / reviews.length : 0,
+    basis: "language",
+    rated: 0,
+  };
+}
+
+function documentFrequency(reviews: Review[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const review of reviews) {
+    const seen = new Set(words(review.text).map(stemWord).filter((w) => w.length > 2));
+    for (const word of seen) counts.set(word, (counts.get(word) ?? 0) + 1);
+  }
+  return counts;
+}
+
+function informative(token: Token, common: Set<string>): boolean {
+  return (
+    token.stem.length > 2 &&
+    !STOPWORDS.has(token.value) &&
+    !BROAD_CONTEXT.has(token.stem) &&
+    !INTENSIFIERS.has(token.value) &&
+    !NEGATIONS.has(token.value) &&
+    !PROBLEM_STEMS.has(token.stem) &&
+    !common.has(token.stem)
+  );
+}
+
+function compactPhrase(sentenceTokens: Token[], start: number, end: number): string {
+  return sentenceTokens
+    .slice(start, end + 1)
+    .map((t) => t.value)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractSignals(review: Review, common: Set<string>): Signal[] {
+  if (!isComplaintReview(review)) return [];
+  const found = new Map<string, Signal>();
+  const sentences = review.text.split(/[.!?;\n]+/).filter(Boolean).slice(0, 12);
+
+  for (const sentence of sentences) {
+    const list = tokens(sentence);
+    for (let i = 0; i < list.length; i += 1) {
+      const current = list[i];
+      if (!current) continue;
+
+      let failureIndex = i;
+      let failure = current.stem;
+      let cueStart = i;
+      const negated = NEGATIONS.has(current.value) && !!list[i + 1];
+      if (negated) {
+        failureIndex = i + 1;
+        failure = `not-${list[failureIndex]?.stem ?? "working"}`;
+      } else if (!isProblemToken(current)) {
+        continue;
+      }
+
+      const nearby = list
+        .filter(
+          (token) =>
+            token.index !== failureIndex &&
+            Math.abs(token.index - failureIndex) <= 5 &&
+            informative(token, common),
+        )
+        .sort((a, b) => {
+          // The object immediately before a complaint cue is generally more
+          // descriptive than an auxiliary verb immediately after it.
+          const sideA = a.index < failureIndex ? 0 : 1;
+          const sideB = b.index < failureIndex ? 0 : 1;
+          if (sideA !== sideB) return sideA - sideB;
+          const distance = Math.abs(a.index - failureIndex) - Math.abs(b.index - failureIndex);
+          return distance !== 0 ? distance : a.index - b.index;
+        });
+      const contextToken = nearby[0] ?? null;
+      // A complaint word without an object or context (for example “worst” or
+      // “bad”) is sentiment, not a customer problem.
+      if (!contextToken) continue;
+
+      const context = contextToken?.stem ?? null;
+      if (!context || context === failure || failure.startsWith(context) || context.startsWith(failure)) {
+        continue;
+      }
+      const left = contextToken ? Math.min(contextToken.index, cueStart) : cueStart;
+      const right = Math.max(contextToken?.index ?? failureIndex, failureIndex);
+      const boundedLeft = Math.max(0, right - 6, left);
+      const phrase = compactPhrase(list, boundedLeft, right);
+      if (phrase.length < 3) continue;
+
+      const key = `${context ?? "_"}|${failure}`;
+      found.set(key, {
+        key,
+        phrase,
+        context,
+        failure,
+        severity:
+          SEVERE_STEMS.has((list[failureIndex] ?? current).stem) ||
+          list.some((token) => INTENSIFIERS.has(token.value)),
+      });
+      if (negated) i = failureIndex;
+      if (found.size >= 8) break;
     }
   }
 
-  const scale = sample.length ? reviews.length / sample.length : 1;
-  const scaled = (n: number) => n * scale;
+  return [...found.values()];
+}
 
-  const candidates = [...negDf.entries()]
-    .filter(([term, n]) => {
-      if (scaled(n) < minCount) return false;
-      const all = allDf.get(term) ?? n;
-      // The term must be negative-leaning within this dataset.
-      return n / all >= 0.5;
+function overlap(a: Set<string>, b: Set<string>): number {
+  const smaller = a.size <= b.size ? a : b;
+  const larger = a.size <= b.size ? b : a;
+  let shared = 0;
+  for (const id of smaller) if (larger.has(id)) shared += 1;
+  return smaller.size ? shared / smaller.size : 0;
+}
+
+function discoverThemes(reviews: Review[], minEvidence: number): Theme[] {
+  if (reviews.length === 0) return [];
+  const frequency = documentFrequency(reviews);
+  // Remove near-universal corpus terms (often the uploaded product name), but
+  // retain recurring problem objects that naturally occur in one large theme.
+  const commonCutoff = Math.max(20, Math.round(reviews.length * 0.45));
+  const common = new Set(
+    [...frequency.entries()].filter(([, count]) => count >= commonCutoff).map(([term]) => term),
+  );
+  const groups = new Map<string, SignalGroup>();
+
+  for (const review of reviews) {
+    for (const signal of extractSignals(review, common)) {
+      const existing = groups.get(signal.key);
+      if (existing) {
+        existing.reviewIds.add(review.id);
+        existing.phrases.set(signal.phrase, (existing.phrases.get(signal.phrase) ?? 0) + 1);
+        if (signal.severity) existing.severeIds.add(review.id);
+      } else {
+        groups.set(signal.key, {
+          key: signal.key,
+          context: signal.context,
+          failure: signal.failure,
+          reviewIds: new Set([review.id]),
+          phrases: new Map([[signal.phrase, 1]]),
+          severeIds: new Set(signal.severity ? [review.id] : []),
+        });
+      }
+    }
+  }
+
+  const eligible = [...groups.values()]
+    .filter((group) => group.reviewIds.size >= minEvidence)
+    .sort((a, b) => b.reviewIds.size - a.reviewIds.size || a.key.localeCompare(b.key));
+
+  const clusters: Cluster[] = [];
+  for (const group of eligible) {
+    const related = clusters.find((cluster) =>
+      cluster.groups.some(
+        (member) =>
+          group.failure === member.failure ||
+          (group.context === member.context && overlap(group.reviewIds, member.reviewIds) >= 0.58),
+      ),
+    );
+    if (related) {
+      related.groups.push(group);
+      for (const id of group.reviewIds) related.reviewIds.add(id);
+    } else {
+      clusters.push({ groups: [group], reviewIds: new Set(group.reviewIds) });
+    }
+  }
+
+  const byId = new Map(reviews.map((review) => [review.id, review]));
+  return clusters
+    .filter((cluster) => cluster.reviewIds.size >= minEvidence)
+    .map((cluster) => {
+      const rankedGroups = [...cluster.groups].sort(
+        (a, b) => b.reviewIds.size - a.reviewIds.size || a.key.localeCompare(b.key),
+      );
+      const lead = rankedGroups[0];
+      if (!lead) return null;
+      const phraseEntries = rankedGroups.flatMap((group) =>
+        [...group.phrases.entries()].map(([phrase, count]) => ({ phrase, count, group })),
+      );
+      phraseEntries.sort((a, b) => b.count - a.count || a.phrase.localeCompare(b.phrase));
+      const representative = phraseEntries[0]?.phrase ?? lead.failure.replace(/^not-/, "not ");
+      const uniqueStems = new Set<string>();
+      const labelWords = words(representative)
+        .filter((word) => !STOPWORDS.has(word) && !BROAD_CONTEXT.has(stemWord(word)))
+        .filter((word) => {
+          const stem = stemWord(word);
+          if (uniqueStems.has(stem)) return false;
+          uniqueStems.add(stem);
+          return true;
+        })
+        .slice(0, 5);
+      const contexts = [...new Set(rankedGroups.map((group) => group.context).filter(Boolean))] as string[];
+      const sharedFailure = rankedGroups.every((group) => group.failure === lead.failure);
+      const fallback = [lead.context, lead.failure.replace(/^not-/, "not ")].filter(Boolean).join(" ");
+      const rawLabel =
+        sharedFailure && contexts.length > 1
+          ? `${contexts.slice(0, 2).join(" & ")} ${lead.failure.replace(/^not-/, "not ")}`
+          : labelWords.length >= 2
+            ? labelWords.join(" ")
+            : fallback || representative;
+      const label = rawLabel.replace(/\b\p{L}/gu, (char) => char.toUpperCase());
+      const keywords = [...new Set(rankedGroups.flatMap((group) =>
+        [...group.phrases.entries()]
+          .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+          .map(([phrase]) => phrase),
+      ))];
+      const examples = keywords.slice(0, 3).map((phrase) => `“${phrase}”`).join(", ");
+      const matched = [...cluster.reviewIds]
+        .map((id) => byId.get(id))
+        .filter((review): review is Review => !!review);
+      const leadCoverage = sharedFailure
+        ? 1
+        : lead.reviewIds.size / cluster.reviewIds.size;
+      const severe = new Set(rankedGroups.flatMap((group) => [...group.severeIds]));
+
+      return {
+        id: stableId(rankedGroups.map((group) => group.key).sort().join("|")),
+        label,
+        keywords,
+        problem: `Across ${matched.length.toLocaleString()} supporting reviews, customers repeatedly describe ${examples || `“${rawLabel}”`}. This cluster is based on recurring complaint expressions and their shared review evidence.`,
+        context: lead.context,
+        failure: lead.failure,
+        coherence: leadCoverage,
+        severityShare: matched.length ? severe.size / matched.length : 0,
+        matched,
+      } satisfies Theme;
     })
-    // Prefer phrases, then frequency: phrases describe problems more precisely.
-    .sort((a, b) => {
-      const phrase = (t: string) => (t.includes(" ") ? 1 : 0);
-      const d = phrase(b[0]) - phrase(a[0]);
-      return d !== 0 ? d : b[1] - a[1];
-    });
+    .filter((theme): theme is Theme => theme !== null)
+    .sort((a, b) => b.matched.length - a.matched.length || a.label.localeCompare(b.label))
+    .filter((theme, index, all) => {
+      const normalized = theme.label.toLowerCase();
+      return all.findIndex((candidate) => candidate.label.toLowerCase() === normalized) === index;
+    })
+    .slice(0, 18);
+}
 
-  const kept: Theme[] = [];
-  const keptTerms: string[] = [];
-  for (const [term, n] of candidates) {
-    if (taken.has(term)) continue;
-    if (keptTerms.some((k) => k.includes(term) || term.includes(k))) continue;
-    keptTerms.push(term);
-    const negShare = negTotal ? n / negTotal : 0;
-    kept.push({
-      label: term.replace(/\b\w/g, (c) => c.toUpperCase()),
-      keywords: [term],
-      problem: `Recurring wording in the connected reviews: “${term}” appears in ${Math.round(scaled(n)).toLocaleString()} reviews that read as negative (${(negShare * 100).toFixed(1)}% of the negative reviews sampled).`,
-      opportunity: `Reduce the “${term}” friction these reviews describe, in the flows where it keeps coming up.`,
-    });
-    if (kept.length >= MAX_DISCOVERED) break;
+function stableId(value: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
   }
-  return kept;
-}
-
-
-const norm = (s: string) => s.toLowerCase();
-
-/** Lowercased verbatim text, cached so large datasets are only normalized once. */
-const lowerCache = new WeakMap<Review, string>();
-function low(r: Review): string {
-  let t = lowerCache.get(r);
-  if (t === undefined) {
-    t = norm(r.text);
-    lowerCache.set(r, t);
-  }
-  return t;
-}
-
-function isNegative(r: Review): boolean {
-  if (r.rating !== null) return r.rating <= 3;
-  const t = low(r);
-  return NEGATIVE_WORDS.some((w) => t.includes(w));
-}
-
-function firstMatchedKeyword(r: Review, keywords: string[]): string | null {
-  const t = low(r);
-  for (const k of keywords) if (t.includes(k)) return k;
-  return null;
+  return Math.abs(hash >>> 0).toString(36);
 }
 
 function buildInsight(id: string, label: string, reviews: Review[]): Insight | null {
   if (reviews.length === 0) return null;
-  const rated = reviews.filter((r) => r.rating !== null) as (Review & { rating: number })[];
+  const rated = reviews.filter((r): r is Review & { rating: number } => r.rating !== null);
+  const negativity = reviewNegativeShare(reviews);
   return {
     id,
     label,
-    reviewIds: reviews.map((r) => r.id),
-    negativeShare: reviews.filter(isNegative).length / reviews.length,
-    avgRating: rated.length ? rated.reduce((s, r) => s + r.rating, 0) / rated.length : null,
+    reviewIds: reviews.map((review) => review.id),
+    negativeShare: negativity.share,
+    avgRating: rated.length ? rated.reduce((sum, review) => sum + review.rating, 0) / rated.length : null,
   };
 }
 
-function median(dates: number[]): number | null {
-  if (dates.length === 0) return null;
-  const s = [...dates].sort((a, b) => a - b);
-  return s[Math.floor(s.length / 2)] ?? null;
-}
-
-/** Verbatim excerpt around the matched wording — text is never rewritten. */
-function excerpt(r: Review, keywords: string[]): Excerpt {
-  const keyword = firstMatchedKeyword(r, keywords);
-  const text = r.text.trim();
+/** Verbatim excerpt around the discovered complaint wording. */
+function excerpt(review: Review, phrases: string[]): Excerpt {
+  const text = review.text.trim();
+  const lower = text.toLowerCase();
+  const phrase = phrases.find((candidate) => lower.includes(candidate.toLowerCase()));
   let snippet = text;
-  if (text.length > 220 && keyword) {
-    const at = low(r).indexOf(keyword);
+  if (text.length > 220 && phrase) {
+    const at = lower.indexOf(phrase.toLowerCase());
     const start = Math.max(0, at - 90);
-    const end = Math.min(text.length, at + keyword.length + 130);
+    const end = Math.min(text.length, at + phrase.length + 130);
     snippet = `${start > 0 ? "…" : ""}${text.slice(start, end).trim()}${end < text.length ? "…" : ""}`;
   } else if (text.length > 220) {
     snippet = `${text.slice(0, 220).trim()}…`;
   }
-  return { reviewId: r.id, text: snippet, date: r.date };
+  return { reviewId: review.id, text: snippet, date: review.date };
 }
 
-function monthKey(t: number) {
-  const d = new Date(t);
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+type TimeContext = {
+  split: number;
+  from: number;
+  to: number;
+  earlierReviews: number;
+  recentReviews: number;
+};
+
+function buildTimeContext(reviews: Review[]): TimeContext | null {
+  const dated = reviews
+    .map((review) => ({ review, time: review.date ? Date.parse(review.date) : NaN }))
+    .filter((item) => !Number.isNaN(item.time));
+  if (dated.length === 0) return null;
+  const from = Math.min(...dated.map((item) => item.time));
+  const to = Math.max(...dated.map((item) => item.time));
+  if (from === to) return null;
+  const split = from + (to - from) / 2;
+  return {
+    split,
+    from,
+    to,
+    earlierReviews: dated.filter((item) => item.time < split).length,
+    recentReviews: dated.filter((item) => item.time >= split).length,
+  };
 }
 
-function buildTrend(matched: Review[], split: number | null): TrendEvidence {
-  const times = matched
-    .map((r) => (r.date ? Date.parse(r.date) : NaN))
-    .filter((n) => !Number.isNaN(n));
-  if (split === null || times.length < MIN_TREND_EVIDENCE) return { evidence: false };
+function monthKey(time: number): string {
+  const date = new Date(time);
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+}
 
-  let recent = 0;
-  let earlier = 0;
-  const buckets = new Map<string, number>();
-  for (const t of times) {
-    if (t >= split) recent += 1;
-    else earlier += 1;
-    const k = monthKey(t);
-    buckets.set(k, (buckets.get(k) ?? 0) + 1);
+function buildTrend(matched: Review[], time: TimeContext | null, minEvidence: number): TrendEvidence {
+  const dated = matched
+    .map((review) => (review.date ? Date.parse(review.date) : NaN))
+    .filter((value) => !Number.isNaN(value));
+  if (!time || dated.length < minEvidence || time.earlierReviews === 0 || time.recentReviews === 0) {
+    return { evidence: false };
   }
-  if (recent === 0 && earlier === 0) return { evidence: false };
 
+  const earlier = dated.filter((value) => value < time.split).length;
+  const recent = dated.length - earlier;
+  const earlierRate = earlier / time.earlierReviews;
+  const recentRate = recent / time.recentReviews;
+  const changePct = earlierRate > 0 ? ((recentRate - earlierRate) / earlierRate) * 100 : null;
+  const buckets = new Map<string, number>();
+  for (const value of dated) {
+    const key = monthKey(value);
+    buckets.set(key, (buckets.get(key) ?? 0) + 1);
+  }
   const months: MonthPoint[] = [...buckets.entries()]
     .map(([month, count]) => ({ month, count }))
     .sort((a, b) => a.month.localeCompare(b.month))
     .slice(-12);
-  const changePct = earlier > 0 ? ((recent - earlier) / earlier) * 100 : null;
-  const direction =
-    changePct === null || changePct > 10 ? "rising" : changePct < -10 ? "falling" : "steady";
 
   return {
     evidence: true,
-    recent,
     earlier,
+    recent,
     changePct,
-    direction,
+    direction: changePct === null || changePct > 10 ? "rising" : changePct < -10 ? "falling" : "steady",
     months,
     window: {
-      from: new Date(Math.min(...times)).toISOString().slice(0, 10),
-      to: new Date(Math.max(...times)).toISOString().slice(0, 10),
+      from: new Date(time.from).toISOString().slice(0, 10),
+      to: new Date(time.to).toISOString().slice(0, 10),
     },
   };
 }
 
-/** Confidence scales with the size of the connected dataset, never a fixed rule. */
-function buildConfidence(mentionCount: number, datedCount: number, total: number): Confidence {
-  const share = total ? mentionCount / total : 0;
-  const strong = Math.max(30, Math.round(total * 0.02));
-  const moderate = Math.max(10, Math.round(total * 0.008));
+function buildConfidence(
+  mentionCount: number,
+  total: number,
+  minEvidence: number,
+  coherence: number,
+  ratedCount: number,
+): Confidence {
+  const strength = mentionCount / Math.max(minEvidence, 1);
+  const ratingCoverage = mentionCount ? ratedCount / mentionCount : 0;
   const level: Confidence["level"] =
-    mentionCount >= strong && datedCount >= mentionCount * 0.5
+    strength >= 3 && coherence >= 0.7
       ? "High"
-      : mentionCount >= moderate
+      : strength >= 1.5 && coherence >= 0.55
         ? "Moderate"
         : "Low";
   return {
     level,
-    basis: `${mentionCount.toLocaleString()} matched reviews (${(share * 100).toFixed(1)}% of ${total.toLocaleString()}), ${datedCount.toLocaleString()} with dates`,
+    basis: `${mentionCount.toLocaleString()} linked reviews (${total ? ((mentionCount / total) * 100).toFixed(1) : "0.0"}% of the dataset); ${(coherence * 100).toFixed(0)}% share the dominant complaint pattern; ${ratedCount.toLocaleString()} carry ratings (${(ratingCoverage * 100).toFixed(0)}%).`,
+  };
+}
+
+function churnEvidence(matched: Review[], minEvidence: number): ChurnEvidence {
+  const labelsById = new Map<string, string[]>();
+  for (const review of matched) {
+    for (const rule of CHURN_PATTERNS) {
+      if (rule.patterns.some((pattern) => pattern.test(review.text))) {
+        const labels = labelsById.get(review.id) ?? [];
+        labels.push(rule.label);
+        labelsById.set(review.id, labels);
+      }
+    }
+  }
+  const reviewIds = [...labelsById.keys()];
+  if (reviewIds.length < minEvidence) return { evidence: false };
+  return {
+    evidence: true,
+    reviewIds,
+    share: matched.length ? reviewIds.length / matched.length : 0,
+    signals: [...new Set([...labelsById.values()].flat())].slice(0, 3),
+  };
+}
+
+function buildOpportunity(theme: Theme, insight: Insight, excerpts: Excerpt[]): OpportunityEvidence {
+  const contextStem = theme.context?.replace(/-/g, " ") ?? null;
+  const failureText = theme.failure.replace(/^not-/, "not ").replace(/-/g, " ");
+  if (!contextStem || contextStem === failureText || theme.coherence < 0.45) return { evidence: false };
+  const evidencePhrase = theme.keywords[0];
+  if (!evidencePhrase || words(evidencePhrase).length < 2) return { evidence: false };
+
+  const phrase = evidencePhrase.replace(/[“”]/g, "");
+  const context = words(phrase).find((word) => stemWord(word) === contextStem) ?? contextStem;
+  const statement =
+    /slow|delay|late|lag|stuck|freez/.test(failureText)
+      ? `Test ways to make ${context} faster and more predictable, with progress or delay visibility when the recurring “${phrase}” condition occurs.`
+      : /fail|error|broke|broken|crash|reject|not/.test(failureText)
+        ? `Test safeguards and a clear recovery path for the recurring “${phrase}” failure in ${context}.`
+        : /wrong|incorrect|miss|lost/.test(failureText)
+          ? `Test validation and correction steps that prevent or quickly resolve the recurring “${phrase}” problem.`
+          : /confus|hard|difficult/.test(failureText)
+            ? `Test clearer guidance and decision support around ${context} where reviews repeatedly describe “${phrase}”.`
+            : /expens|refund|waste/.test(failureText)
+              ? `Test clearer cost visibility, controls, and recovery around ${context} for reviews describing “${phrase}”.`
+              : /cancel/.test(failureText)
+                ? `Investigate why “${phrase}” recurs and test prevention, clearer accountability, and recovery steps.`
+                : `Test a targeted prevention and recovery intervention for the recurring “${phrase}” problem around ${context}.`;
+
+  return {
+    evidence: true,
+    statement,
+    reviewIds: insight.reviewIds,
+    excerpts: excerpts.slice(0, 3),
   };
 }
 
 export function analyze(reviews: Review[]): Analysis {
   const total = reviews.length;
   const limits = thresholds(total);
-  MIN_PAIN_EVIDENCE = limits.pain;
-  MIN_TREND_EVIDENCE = limits.trend;
-  MIN_CHURN_EVIDENCE = limits.churn;
+  const time = buildTimeContext(reviews);
+  const themes = discoverThemes(reviews, limits.pain);
+  const unranked = themes.map((theme) => {
+    const insight = buildInsight(`theme-${theme.id}`, theme.label, theme.matched);
+    if (!insight) return null;
+    const datedCount = theme.matched.filter((review) => review.date !== null).length;
+    const ratedCount = theme.matched.filter((review) => review.rating !== null).length;
+    const trend = buildTrend(theme.matched, time, limits.trend);
+    const churn = churnEvidence(theme.matched, limits.churn);
+    const negativeReviews = [...theme.matched]
+      .filter(isComplaintReview)
+      .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
+    const excerptSource = negativeReviews.length ? negativeReviews : theme.matched;
+    const excerpts = excerptSource.slice(0, 4).map((review) => excerpt(review, theme.keywords));
+    const confidence = buildConfidence(
+      insight.reviewIds.length,
+      total,
+      limits.pain,
+      theme.coherence,
+      ratedCount,
+    );
 
-  const rated = reviews.filter((r) => r.rating !== null) as (Review & { rating: number })[];
-  const times = reviews
-    .map((r) => (r.date ? Date.parse(r.date) : NaN))
-    .filter((n) => !Number.isNaN(n));
-  const split = median(times);
+    const opportunity = buildOpportunity(theme, insight, excerpts);
 
-  // Themes: generic lexicon wording present in this file, plus wording mined
-  // from this file's own negative reviews.
-  const lexiconTerms = new Set(LEXICON_THEMES.flatMap((t) => t.keywords));
-  const THEMES: Theme[] = [
-    ...LEXICON_THEMES,
-    ...discoverThemes(reviews, MIN_PAIN_EVIDENCE, lexiconTerms),
-  ];
+    return {
+      theme,
+      insight,
+      datedCount,
+      trend,
+      churn,
+      excerpts,
+      confidence,
+      rawFactors: {
+        volume: insight.reviewIds.length,
+        negative: insight.negativeShare,
+        trend: trend.evidence && trend.changePct !== null ? Math.max(0, trend.changePct) : 0,
+        quality: theme.coherence,
+        severity: theme.severityShare,
+      },
+      opportunity,
+    };
+  }).filter((item): item is NonNullable<typeof item> => item !== null);
 
-  // Single pass over the dataset: theme, churn and request membership.
-  const themeMatched: Review[][] = THEMES.map(() => []);
-  const churnMatched: Review[][] = CHURN_RULES.map(() => []);
-  const churnSet = new Set<string>();
-  const churnLabelsByReview = new Map<string, string[]>();
-  const requestSet = new Set<string>();
-
-  for (const r of reviews) {
-    const t = low(r);
-    const negative = isNegative(r);
-    THEMES.forEach((theme, i) => {
-      if (theme.keywords.some((k) => t.includes(k))) themeMatched[i]!.push(r);
-    });
-    CHURN_RULES.forEach((rule, i) => {
-      if (negative && rule.keywords.some((k) => t.includes(k))) {
-        churnMatched[i]!.push(r);
-        churnSet.add(r.id);
-        const list = churnLabelsByReview.get(r.id);
-        if (list) list.push(rule.label);
-        else churnLabelsByReview.set(r.id, [rule.label]);
-      }
-    });
-    if (OPPORTUNITY_KEYWORDS.some((k) => t.includes(k))) {
-      requestSet.add(r.id);
-    }
-  }
-
-  const themeInsights = THEMES.map((theme, i) => ({
-    theme,
-    matched: themeMatched[i]!,
-    insight: buildInsight(`theme-${i}`, theme.label, themeMatched[i]!),
-  })).filter((x) => x.insight !== null) as {
-    theme: Theme;
-    matched: Review[];
-    insight: Insight;
-  }[];
-
-
-  // Legacy insight collections kept for the trend / churn / opportunity sections.
-  const trends = themeInsights
-    .map(({ matched, insight }) => {
-      const t = buildTrend(matched, split);
-      return t.evidence
-        ? { ...insight, recent: t.recent, earlier: t.earlier, changePct: t.changePct }
-        : null;
-    })
-    .filter((t): t is NonNullable<typeof t> => t !== null)
-    .sort((a, b) => (b.changePct ?? -Infinity) - (a.changePct ?? -Infinity));
-
-  const churnSignals = CHURN_RULES.map((rule, i) =>
-    buildInsight(`churn-${i}`, rule.label, churnMatched[i]!),
-  )
-    .filter((i): i is Insight => i !== null && i.reviewIds.length >= MIN_CHURN_EVIDENCE)
-    .sort((a, b) => b.reviewIds.length - a.reviewIds.length);
-
-  // Opportunities are derived from the pain points below (see `opportunities`).
-
-
-  // Pain points: negative-dominant themes with enough evidence to report.
-  const candidates = themeInsights
-    .filter(({ insight }) => insight.negativeShare >= 0.5 && insight.reviewIds.length >= MIN_PAIN_EVIDENCE)
-    .sort((a, b) => b.insight.reviewIds.length - a.insight.reviewIds.length);
-
-  const maxMentions = candidates[0]?.insight.reviewIds.length ?? 0;
-
-  const scored = candidates.map(({ theme, matched, insight }) => {
-    const reach = maxMentions ? insight.reviewIds.length / maxMentions : 0;
-    const churnIds = insight.reviewIds.filter((id) => churnSet.has(id));
-    const churnShare = churnIds.length / insight.reviewIds.length;
-    const score = Math.round((reach * 0.55 + insight.negativeShare * 0.3 + churnShare * 0.15) * 100);
-    return { theme, matched, insight, churnIds, churnShare, score };
+  const percentile = (value: number, values: number[]) => {
+    if (values.length <= 1) return value > 0 ? 1 : 0;
+    const below = values.filter((candidate) => candidate < value).length;
+    const equal = values.filter((candidate) => candidate === value).length;
+    return (below + Math.max(0, equal - 1) / 2) / (values.length - 1);
+  };
+  const factorKeys = ["volume", "negative", "trend", "quality", "severity"] as const;
+  const factorValues = Object.fromEntries(
+    factorKeys.map((key) => [key, unranked.map((item) => item.rawFactors[key])]),
+  ) as Record<(typeof factorKeys)[number], number[]>;
+  const ranked = unranked.map((item) => {
+    const factors = Object.fromEntries(
+      factorKeys.map((key) => [key, percentile(item.rawFactors[key], factorValues[key])]),
+    ) as Record<(typeof factorKeys)[number], number>;
+    const score = Math.round(
+      (factorKeys.reduce((sum, key) => sum + factors[key], 0) / factorKeys.length) * 100,
+    );
+    return { ...item, factors, score };
   });
+  ranked.sort((a, b) => b.score - a.score || b.insight.reviewIds.length - a.insight.reviewIds.length);
 
-  const painPoints: PainPoint[] = [...scored]
-    .sort((a, b) => b.score - a.score)
-    .map((c, index) => {
-      const { theme, matched, insight, churnIds, churnShare, score } = c;
-      const datedCount = matched.filter((r) => r.date !== null).length;
-      const trend = buildTrend(matched, split);
-
-      const negativeMatched = matched.filter(isNegative);
-      const excerptSource = (negativeMatched.length ? negativeMatched : matched).slice(0, 400);
-      const excerpts = excerptSource
-        .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""))
-        .slice(0, 4)
-        .map((r) => excerpt(r, theme.keywords));
-
-      const churn: ChurnEvidence =
-        churnIds.length >= MIN_CHURN_EVIDENCE
-          ? {
-              evidence: true,
-              reviewIds: churnIds,
-              share: churnShare,
-              signals: [
-                ...new Set(churnIds.flatMap((id) => churnLabelsByReview.get(id) ?? [])),
-              ].slice(0, 3),
-            }
-          : { evidence: false };
-
-      // Opportunities follow from the pain point itself: any pain point with
-      // enough evidence to report also has enough evidence for a potential,
-      // validation-pending opportunity. Reviews that explicitly ask for
-      // something are preferred as excerpts when they exist, but not required.
-      const requested = matched.filter((r) => requestSet.has(r.id));
-      const oppExcerptSource = requested.length ? requested : excerptSource;
-      const opportunity: OpportunityEvidence = {
-        evidence: true,
-        statement: theme.opportunity,
-        reviewIds: insight.reviewIds,
-        excerpts: oppExcerptSource
-          .slice(0, 3)
-          .map((r) => excerpt(r, requested.length ? OPPORTUNITY_KEYWORDS : theme.keywords)),
-      };
-
-
-      return {
-        ...insight,
-        description: theme.problem,
-        keywords: theme.keywords,
-        mentionCount: insight.reviewIds.length,
-
-        datasetShare: total ? insight.reviewIds.length / total : 0,
-        excerpts,
-        trend,
-        confidence: buildConfidence(insight.reviewIds.length, datedCount, total),
-        churn,
-        priority: {
-          score,
-          rank: index + 1,
-          impact: score >= 70 ? "High" : score >= 40 ? "Medium" : "Low",
-          rationale: `Ranked from reach (${insight.reviewIds.length.toLocaleString()} mentions), negative share (${Math.round(insight.negativeShare * 100)}%) and churn-language overlap (${Math.round(churnShare * 100)}%) in the connected reviews.`,
-        },
-        opportunity,
-      } satisfies PainPoint;
-    });
-
-  const priorities: PriorityItem[] = painPoints.slice(0, 5).map((p) => ({
-    ...p,
-    id: `prio-${p.id}`,
-    score: p.priority.score,
-    impact: p.priority.impact,
+  const painPoints: PainPoint[] = ranked.map((item, index) => ({
+    ...item.insight,
+    description: item.theme.problem,
+    keywords: item.theme.keywords,
+    mentionCount: item.insight.reviewIds.length,
+    datasetShare: total ? item.insight.reviewIds.length / total : 0,
+    excerpts: item.excerpts,
+    trend: item.trend,
+    confidence: item.confidence,
+    churn: item.churn,
+    priority: {
+      score: item.score,
+      rank: index + 1,
+      impact: index < Math.ceil(ranked.length / 3) ? "High" : index < Math.ceil((ranked.length * 2) / 3) ? "Medium" : "Low",
+      rationale: `Equal-weight evidence ranks within this dataset: volume ${Math.round(item.factors.volume * 100)}/100, negative rating share ${Math.round(item.factors.negative * 100)}/100, comparable-period trend ${Math.round(item.factors.trend * 100)}/100, cluster consistency ${Math.round(item.factors.quality * 100)}/100, and severity evidence ${Math.round(item.factors.severity * 100)}/100.`,
+    },
+    opportunity: item.opportunity,
   }));
 
-  // One potential opportunity per sufficiently evidenced pain point, linked to
-  // that pain point's own supporting review IDs.
+  const trends = painPoints
+    .filter((pain) => pain.trend.evidence)
+    .map((pain) => {
+      if (!pain.trend.evidence) return null;
+      return {
+        id: `trend-${pain.id}`,
+        label: pain.label,
+        reviewIds: pain.reviewIds,
+        negativeShare: pain.negativeShare,
+        avgRating: pain.avgRating,
+        recent: pain.trend.recent,
+        earlier: pain.trend.earlier,
+        changePct: pain.trend.changePct,
+      };
+    })
+    .filter((trend): trend is NonNullable<typeof trend> => trend !== null)
+    .sort((a, b) => (b.changePct ?? -Infinity) - (a.changePct ?? -Infinity));
+
+  const churnSignals = CHURN_PATTERNS.map((rule, index) => {
+    const matched = reviews.filter((review) => rule.patterns.some((pattern) => pattern.test(review.text)));
+    return buildInsight(`churn-${index}`, rule.label, matched);
+  })
+    .filter((insight): insight is Insight => !!insight && insight.reviewIds.length >= limits.churn)
+    .sort((a, b) => b.reviewIds.length - a.reviewIds.length);
+
+  const priorities: PriorityItem[] = painPoints.slice(0, 5).map((pain) => ({
+    ...pain,
+    id: `prio-${pain.id}`,
+    score: pain.priority.score,
+    impact: pain.priority.impact,
+  }));
+
   const opportunities: OpportunityItem[] = painPoints
-    .filter((p) => p.opportunity.evidence)
-    .map((p) => ({
-      id: `opp-${p.id}`,
-      // A solution hypothesis, not a repeat of the pain point name.
-      label: p.opportunity.evidence ? p.opportunity.statement : p.label,
-      painLabel: p.label,
-      painPointId: p.id,
-      reviewIds: p.reviewIds,
-      negativeShare: p.negativeShare,
-      avgRating: p.avgRating,
+    .filter((pain) => pain.opportunity.evidence)
+    .map((pain) => ({
+      id: `opp-${pain.id}`,
+      label: pain.opportunity.evidence ? pain.opportunity.statement : pain.label,
+      painLabel: pain.label,
+      painPointId: pain.id,
+      reviewIds: pain.reviewIds,
+      negativeShare: pain.negativeShare,
+      avgRating: pain.avgRating,
     }))
     .sort((a, b) => b.reviewIds.length - a.reviewIds.length);
 
+  const rated = reviews.filter((review): review is Review & { rating: number } => review.rating !== null);
+  const dated = reviews
+    .map((review) => (review.date ? Date.parse(review.date) : NaN))
+    .filter((value) => !Number.isNaN(value));
+  const overallNegative = reviewNegativeShare(reviews);
 
   return {
     kpis: {
       reviewCount: total,
       ratedCount: rated.length,
-      avgRating: rated.length ? rated.reduce((s, r) => s + r.rating, 0) / rated.length : null,
-      negativeShare: total ? reviews.filter(isNegative).length / total : null,
-      themeCount: themeInsights.length,
-      dateRange: times.length
+      avgRating: rated.length ? rated.reduce((sum, review) => sum + review.rating, 0) / rated.length : null,
+      negativeShare: total ? overallNegative.share : null,
+      themeCount: painPoints.length,
+      dateRange: dated.length
         ? {
-            from: new Date(Math.min(...times)).toISOString().slice(0, 10),
-            to: new Date(Math.max(...times)).toISOString().slice(0, 10),
+            from: new Date(Math.min(...dated)).toISOString().slice(0, 10),
+            to: new Date(Math.max(...dated)).toISOString().slice(0, 10),
           }
         : null,
     },
@@ -554,7 +757,6 @@ export function analyze(reviews: Review[]): Analysis {
 
 type Group = { kind: string; items: Insight[] };
 
-/** reviewId -> supporting insights, built once per Analysis. */
 const evidenceIndex = new WeakMap<Analysis, Map<string, Group[]>>();
 
 function buildIndex(analysis: Analysis): Map<string, Group[]> {
@@ -568,17 +770,17 @@ function buildIndex(analysis: Analysis): Map<string, Group[]> {
     { kind: "Opportunity", items: analysis.opportunities },
   ];
   const index = new Map<string, Group[]>();
-  for (const g of groups) {
-    for (const insight of g.items) {
+  for (const group of groups) {
+    for (const insight of group.items) {
       for (const id of insight.reviewIds) {
         const existing = index.get(id);
         if (!existing) {
-          index.set(id, [{ kind: g.kind, items: [insight] }]);
+          index.set(id, [{ kind: group.kind, items: [insight] }]);
           continue;
         }
-        const group = existing.find((e) => e.kind === g.kind);
-        if (group) group.items.push(insight);
-        else existing.push({ kind: g.kind, items: [insight] });
+        const matching = existing.find((entry) => entry.kind === group.kind);
+        if (matching) matching.items.push(insight);
+        else existing.push({ kind: group.kind, items: [insight] });
       }
     }
   }
@@ -586,12 +788,10 @@ function buildIndex(analysis: Analysis): Map<string, Group[]> {
   return index;
 }
 
-/** Every insight (of any kind) that a given review is evidence for. */
 export function insightsForReview(analysis: Analysis, reviewId: string): Group[] {
   return buildIndex(analysis).get(reviewId) ?? [];
 }
 
-/** Count of supporting insights, cheap for long feeds. */
 export function insightCountForReview(analysis: Analysis, reviewId: string): number {
-  return insightsForReview(analysis, reviewId).reduce((n, g) => n + g.items.length, 0);
+  return insightsForReview(analysis, reviewId).reduce((count, group) => count + group.items.length, 0);
 }

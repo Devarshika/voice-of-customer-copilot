@@ -60,6 +60,19 @@ function result(passed: number, checked: number, detail: string): CheckResult {
 
 const clean = (s: string) => s.replace(/^…|…$/g, "").trim().toLowerCase();
 
+const searchable = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}']+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+/** Discovered phrases are token-normalized, so punctuation must not create a false flag. */
+function containsThemeWording(text: string, keywords: string[]): boolean {
+  const normalized = searchable(text);
+  return keywords.some((keyword) => normalized.includes(searchable(keyword)));
+}
+
 export function evaluate(reviews: Review[], analysis: Analysis): Evaluation {
   const byId = new Map(reviews.map((r) => [r.id, r]));
   const sampled: PainPoint[] = analysis.painPoints;
@@ -103,8 +116,7 @@ export function evaluate(reviews: Review[], analysis: Analysis): Evaluation {
       const r = byId.get(id);
       if (!r) continue;
       consistentChecked += 1;
-      const t = r.text.toLowerCase();
-      if (pain.keywords.some((k) => t.includes(k))) consistentPass += 1;
+      if (containsThemeWording(r.text, pain.keywords)) consistentPass += 1;
       else if (offTheme.length < 3) offTheme.push(id);
     }
     if (offTheme.length > 0) {
@@ -123,7 +135,7 @@ export function evaluate(reviews: Review[], analysis: Analysis): Evaluation {
       const snippet = clean(ex.text);
       const linked = pain.reviewIds.includes(ex.reviewId);
       const verbatim = !!r && r.text.toLowerCase().includes(snippet);
-      const onTheme = pain.keywords.some((k) => snippet.includes(k));
+      const onTheme = containsThemeWording(snippet, pain.keywords);
       if (linked && verbatim && onTheme) relevantPass += 1;
       else {
         flags.push({
