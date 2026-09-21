@@ -67,7 +67,7 @@ const STOPWORDS = new Set([
 ]);
 
 const BROAD_CONTEXT = new Set([
-  "able","anything","app","application","brand","business","company","customer","customers","day","everything","experience","find","good","keep","know","let","one","overall","platform","product","products","select","service","services","something","system","thing","things","time","use","user","users","want","way","went","whole","work",
+  "able","anything","app","application","arrive","brand","business","company","customer","customers","day","days","end","ends","everything","experience","find","good","hour","hours","keep","know","let","minute","minutes","month","months","one","overall","platform","product","products","select","service","services","show","shows","something","system","thing","things","time","times","use","user","users","want","way","week","weeks","went","whole","work",
 ]);
 
 // Generic expressions of failure or friction. These identify complaint
@@ -437,7 +437,13 @@ function discoverThemes(reviews: Review[], minEvidence: number): Theme[] {
       } satisfies Theme;
     })
      .filter((theme): theme is Theme => theme !== null)
-     .filter((theme) => theme.coherence >= 0.58 && words(theme.label).length >= 2)
+     .filter((theme) => {
+       const meaningful = words(theme.label).filter((word) => {
+         const stem = stemWord(word);
+         return !STOPWORDS.has(word) && !BROAD_CONTEXT.has(stem) && !PROBLEM_STEMS.has(stem);
+       });
+       return theme.coherence >= 0.58 && meaningful.length >= 1 && words(theme.label).length >= 2;
+     })
     .sort((a, b) => b.matched.length - a.matched.length || a.label.localeCompare(b.label))
     .filter((theme, index, all) => {
       const normalized = theme.label.toLowerCase();

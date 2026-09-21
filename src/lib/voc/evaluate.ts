@@ -246,7 +246,8 @@ export function evaluate(reviews: Review[], analysis: Analysis): Evaluation {
 
     claimsChecked += 1;
     if (pain.opportunity.evidence) {
-      const bad = pain.opportunity.reviewIds.filter((id) => !byId.has(id));
+      const opportunity = pain.opportunity;
+      const bad = opportunity.reviewIds.filter((id) => !byId.has(id));
       if (bad.length > 0) {
         unsupported += 1;
         flags.push({
@@ -258,22 +259,22 @@ export function evaluate(reviews: Review[], analysis: Analysis): Evaluation {
       }
 
       opportunityChecked += 1;
-      const outside = pain.opportunity.reviewIds.filter((id) => !pain.reviewIds.includes(id));
-      const excerptOutside = pain.opportunity.excerpts.filter(
-        (item) => !pain.opportunity.reviewIds.includes(item.reviewId),
+      const outside = opportunity.reviewIds.filter((id) => !pain.reviewIds.includes(id));
+      const excerptOutside = opportunity.excerpts.filter(
+        (item) => !opportunity.reviewIds.includes(item.reviewId),
       );
       const problemConnection = pain.keywords.some(
-        (keyword) => normalizedOverlap(pain.opportunity.evidence ? pain.opportunity.statement : "", keyword) >= 0.12,
+        (keyword) => normalizedOverlap(opportunity.statement, keyword) >= 0.12,
       );
-      const notParaphrase = normalizedOverlap(pain.opportunity.statement, pain.label) < 0.72;
-      const actionable = INTERVENTION_WORDS.test(pain.opportunity.statement);
+      const notParaphrase = normalizedOverlap(opportunity.statement, pain.label) < 0.72;
+      const actionable = INTERVENTION_WORDS.test(opportunity.statement);
       if (outside.length === 0 && excerptOutside.length === 0 && problemConnection && notParaphrase && actionable) {
         opportunityPass += 1;
       } else {
         flags.push({
           insightId: pain.id,
           insightLabel: pain.label,
-          reviewIds: pain.opportunity.reviewIds.slice(0, 3),
+          reviewIds: opportunity.reviewIds.slice(0, 3),
           reason: "Potential opportunity is generic, repetitive, unsupported, or not clearly connected to the evidenced customer problem.",
         });
       }
