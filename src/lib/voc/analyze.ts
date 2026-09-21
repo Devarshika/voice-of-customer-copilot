@@ -67,7 +67,7 @@ const STOPWORDS = new Set([
 ]);
 
 const BROAD_CONTEXT = new Set([
-  "able","app","application","brand","business","company","customer","customers","experience","find","good","keep","know","let","one","platform","product","products","select","service","services","system","thing","things","use","user","users","want","way","work",
+  "able","app","application","brand","business","company","customer","customers","experience","find","good","keep","know","let","one","platform","product","products","select","service","services","system","thing","things","use","user","users","want","way","went","work",
 ]);
 
 // Generic expressions of failure or friction. These identify complaint
@@ -585,7 +585,7 @@ function buildOpportunity(theme: Theme, insight: Insight, excerpts: Excerpt[]): 
             : /expens|refund|waste/.test(failureText)
               ? `Test clearer cost visibility, controls, and recovery around ${context} for reviews describing “${phrase}”.`
               : /cancel/.test(failureText)
-                ? `Investigate why “${phrase}” recurs and test prevention plus recovery steps around ${context}.`
+                ? `Investigate why “${phrase}” recurs and test prevention, clearer accountability, and recovery steps.`
                 : `Test a targeted prevention and recovery intervention for the recurring “${phrase}” problem around ${context}.`;
 
   return {
