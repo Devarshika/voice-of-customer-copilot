@@ -547,25 +547,24 @@ function churnEvidence(matched: Review[], minEvidence: number): ChurnEvidence {
 
 function buildOpportunity(theme: Theme, insight: Insight, excerpts: Excerpt[]): OpportunityEvidence {
   const context = theme.context?.replace(/-/g, " ") ?? null;
-  const failure = theme.failure.replace(/^not-/, "not ").replace(/-/g, " ");
-  if (!context || context === failure || theme.coherence < 0.45) return { evidence: false };
+  const failureText = theme.failure.replace(/^not-/, "not ").replace(/-/g, " ");
+  if (!context || context === failureText || theme.coherence < 0.45) return { evidence: false };
   const evidencePhrase = theme.keywords[0];
   if (!evidencePhrase || words(evidencePhrase).length < 2) return { evidence: false };
 
   const phrase = evidencePhrase.replace(/[“”]/g, "");
-  const failure = theme.failure.replace(/^not-/, "not ");
   const statement =
-    /slow|delay|late|lag|stuck|freez/.test(failure)
+    /slow|delay|late|lag|stuck|freez/.test(failureText)
       ? `Test ways to make ${context} faster and more predictable, with progress or delay visibility when the recurring “${phrase}” condition occurs.`
-      : /fail|error|broke|broken|crash|reject|not/.test(failure)
+      : /fail|error|broke|broken|crash|reject|not/.test(failureText)
         ? `Test safeguards and a clear recovery path for the recurring “${phrase}” failure in ${context}.`
-        : /wrong|incorrect|miss|lost/.test(failure)
+        : /wrong|incorrect|miss|lost/.test(failureText)
           ? `Test validation and correction steps that prevent or quickly resolve the recurring “${phrase}” problem.`
-          : /confus|hard|difficult/.test(failure)
+          : /confus|hard|difficult/.test(failureText)
             ? `Test clearer guidance and decision support around ${context} where reviews repeatedly describe “${phrase}”.`
-            : /expens|refund|waste/.test(failure)
+            : /expens|refund|waste/.test(failureText)
               ? `Test clearer cost visibility, controls, and recovery around ${context} for reviews describing “${phrase}”.`
-              : /cancel/.test(failure)
+              : /cancel/.test(failureText)
                 ? `Investigate why “${phrase}” recurs and test prevention plus recovery steps around ${context}.`
                 : `Test a targeted prevention and recovery intervention for the recurring “${phrase}” problem around ${context}.`;
 
