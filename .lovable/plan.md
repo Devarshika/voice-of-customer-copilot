@@ -1,26 +1,34 @@
-# Dataset-Agnostic Insight Engine
+# Dataset-Agnostic Insight Quality Refinement
 
 ## Goal
-Replace predefined topic matching with deterministic discovery of recurring customer problems from whichever review dataset is selected, without changing the dashboard, uploads, review feed, or evidence-linking interactions.
+Improve the existing deterministic analysis and evaluation engines so they identify coherent recurring customer problems—not frequent entities or vague phrases—across any uploaded review dataset, while preserving the current dashboard, uploads, filters, evidence links, and cross-filtering behavior.
 
-## Changes
-- Remove predefined product/domain pain-point categories and opportunity templates from analysis.
-- Discover candidate complaint phrases from negative reviews, then cluster semantically related wording using shared contextual terms and phrase overlap.
-- Reject generic entities, standalone nouns, product names, and broad contexts unless they occur within a recurring problem expression.
-- Generate each pain-point title and description from representative complaint phrases and supporting reviews.
-- Keep every result linked to exact review IDs and verbatim excerpts; suppress weak clusters as insufficient evidence.
-- Compute negative share from available ratings, using text-based negativity only to discover evidence when ratings are absent.
-- Compare cluster counts across equal date periods for emerging trends, with actual counts and dates.
-- Keep churn detection limited to explicit stop/switch/cancel/repeated-unresolved language.
-- Derive priority from normalized volume, rated negative share, comparable trend, evidence consistency, and severity; expose those factors in the existing rationale text.
-- Generate varied, domain-neutral intervention hypotheses from the cluster’s observed problem pattern and context, while preserving the pain point → reviews chain and validation warning.
-- Update deterministic evaluation so consistency checks validate cluster phrases/context rather than old fixed keywords.
+## Analysis changes
+- Replace broad failure-word merging with structured complaint signatures built from each review’s problem cue, affected context, nearby action, and normalized phrase evidence.
+- Merge wording variants only when their problem signatures are compatible and their supporting-review/context evidence is sufficiently similar; prevent a shared entity or generic failure word from merging distinct problems.
+- Reject vague or non-problem clusters before display using evidence-size, proposition completeness, semantic coherence, context specificity, and contradiction/noise checks.
+- Generate concise problem labels and descriptions from representative complaint propositions while keeping all labels traceable to actual wording and all linked IDs resolvable.
+- Base confidence on support above the dataset-adaptive threshold, signature consistency, relevant-evidence share, context specificity, and rating coverage—not volume alone.
+- Report trends only from dated cluster evidence across equal periods when both periods and absolute counts meet adaptive minimums; retain actual counts and date windows.
+- Keep churn limited to explicit behavioral-intent language and linked review evidence.
+- Keep prioritization evidence-derived, but suppress generic clusters and explain volume, negative share, reliable trend, cluster quality, and severity factors.
+- Generate opportunities from the cluster’s observed failure, affected context, and consequences. Require a specific, logically connected intervention hypothesis; otherwise return “Insufficient evidence.” Preserve the opportunity → pain point → reviews chain.
+
+## Evaluation changes
+- Keep ID resolution and numeric claim validation as deterministic grounding checks.
+- Replace phrase-presence consistency with review-to-problem signature compatibility across a bounded sample of linked reviews.
+- Evaluate excerpt relevance using the same underlying-problem signature plus verbatim/link validation, rather than keyword overlap alone.
+- Add generic/non-problem detection for entity-only, noun-only, vague, or incomplete labels/clusters.
+- Add opportunity grounding checks for problem/intervention linkage, specificity, non-paraphrase, and unsupported assumptions.
+- Mark checks “Not evaluated” when the available evidence cannot support a reliable result.
+- Preserve the current evaluation screen structure while adding the new quality dimensions and clarifying that percentages are deterministic validation pass rates, not AI accuracy.
 
 ## Verification
-- Confirm the default Uber dataset produces specific complaint clusters rather than generic entities.
-- Test a second uploaded-style dataset with unrelated terminology to confirm no Uber-specific assumptions.
-- Verify all supporting IDs resolve, excerpts remain verbatim, opportunity labels differ from pain-point labels, trends use dated evidence, and the existing cross-filtering still works.
-- Check the preview for runtime errors and confirm the latest build succeeds.
+- Test the connected Uber reviews without any Uber-specific terms, categories, or templates in analysis/evaluation code; confirm vague results such as “Something Wrong” are rejected.
+- Test the unrelated connected review dataset and a synthetic multi-domain fixture containing paraphrased same-problem reviews plus same-entity/different-problem reviews.
+- Verify linked IDs, verbatim excerpts, counts, rating-based negative share, trend windows, conservative churn evidence, priority rationale, and opportunity lineage.
+- Confirm AI Evaluation flags intentionally generic, incoherent, irrelevant, and repetitive-opportunity fixtures while valid clusters pass applicable checks.
+- Verify dataset switching and insight/review cross-filtering remain current, and confirm no build or runtime errors.
 
 ## Technical details
-The implementation remains local and deterministic. It will use normalized phrase extraction, document-frequency scoring, context signatures, overlap-based clustering, adaptive evidence thresholds, and stable IDs. No AI service, new page, persistence layer, or visual redesign is added.
+Extract shared, domain-neutral complaint-signature helpers into a small analysis utility so generation and evaluation use the same linguistic representation but separate acceptance checks. Use deterministic token normalization, local context/action windows, corpus-derived common-term filtering, adaptive thresholds, signature similarity, and evidence ratios. No external AI service, persistence, new page, or visual redesign is introduced.
