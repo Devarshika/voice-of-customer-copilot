@@ -27,6 +27,11 @@ function CheckCard({ title, check }: { title: string; check: CheckResult }) {
             {check.passed.toLocaleString()} of {check.checked.toLocaleString()} passed · {check.status}
           </div>
           <div className="mt-1 text-[10.5px] leading-relaxed text-ink-soft">{check.detail}</div>
+          <div className="mt-1 text-[9.5px] text-ink-soft/80">
+            {check.method === "exact"
+              ? "Exact deterministic validation"
+              : "Deterministic quality heuristic — not a semantic guarantee or AI accuracy score"}
+          </div>
         </>
       ) : (
         <div className="mt-1 text-[11px] text-ink-soft">{NOT_EVALUATED}</div>
@@ -58,9 +63,9 @@ export function EvaluationPanel({
         <div>
           <h2 className="font-display text-[15px] font-semibold">AI Evaluation</h2>
           <p className="mt-0.5 max-w-[70ch] text-[11px] leading-relaxed text-ink-soft">
-            Deterministic checks of whether the generated pain points are supported by the connected
-            reviews. Every figure is a count over sampled insights and their linked reviews; checks
-            that cannot be computed read “{NOT_EVALUATED}”.
+            Exact checks validate evidence linkage and stated facts. Marked quality heuristics flag
+            likely semantic issues but do not measure “AI accuracy.” Every figure is a pass rate over
+            sampled insights or linked reviews; unavailable checks read “{NOT_EVALUATED}”.
           </p>
         </div>
         <button
@@ -123,6 +128,8 @@ export function EvaluationPanel({
         <CheckCard title="Evidence grounding" check={evaluation.grounding} />
         <CheckCard title="Theme / cluster consistency" check={evaluation.consistency} />
         <CheckCard title="Evidence relevance" check={evaluation.relevance} />
+        <CheckCard title="Problem specificity" check={evaluation.specificity} />
+        <CheckCard title="Opportunity grounding" check={evaluation.opportunityGrounding} />
       </div>
 
       <div className="mt-4">

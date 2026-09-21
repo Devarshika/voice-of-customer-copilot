@@ -67,7 +67,7 @@ const STOPWORDS = new Set([
 ]);
 
 const BROAD_CONTEXT = new Set([
-  "able","app","application","brand","business","company","customer","customers","experience","find","good","keep","know","let","one","platform","product","products","select","service","services","system","thing","things","use","user","users","want","way","went","work",
+  "able","anything","app","application","brand","business","company","customer","customers","day","everything","experience","find","good","keep","know","let","one","overall","platform","product","products","select","service","services","something","system","thing","things","time","use","user","users","want","way","went","whole","work",
 ]);
 
 // Generic expressions of failure or friction. These identify complaint
@@ -294,6 +294,32 @@ function overlap(a: Set<string>, b: Set<string>): number {
   return smaller.size ? shared / smaller.size : 0;
 }
 
+function groupVocabulary(group: SignalGroup): Set<string> {
+  return new Set(
+    [...group.phrases.keys()]
+      .flatMap(words)
+      .map(stemWord)
+      .filter((word) => word.length > 2 && !STOPWORDS.has(word) && !BROAD_CONTEXT.has(word)),
+  );
+}
+
+function vocabularySimilarity(a: SignalGroup, b: SignalGroup): number {
+  const left = groupVocabulary(a);
+  const right = groupVocabulary(b);
+  const union = new Set([...left, ...right]);
+  if (union.size === 0) return 0;
+  let shared = 0;
+  for (const word of left) if (right.has(word)) shared += 1;
+  return shared / union.size;
+}
+
+function groupsDescribeSameProblem(a: SignalGroup, b: SignalGroup): boolean {
+  const evidenceOverlap = overlap(a.reviewIds, b.reviewIds);
+  if (a.context === b.context && a.failure === b.failure) return true;
+  if (a.failure === b.failure) return vocabularySimilarity(a, b) >= 0.45;
+  return a.context === b.context && evidenceOverlap >= 0.58 && vocabularySimilarity(a, b) >= 0.35;
+}
+
 function discoverThemes(reviews: Review[], minEvidence: number): Theme[] {
   if (reviews.length === 0) return [];
   const frequency = documentFrequency(reviews);
@@ -332,11 +358,7 @@ function discoverThemes(reviews: Review[], minEvidence: number): Theme[] {
   const clusters: Cluster[] = [];
   for (const group of eligible) {
     const related = clusters.find((cluster) =>
-      cluster.groups.some(
-        (member) =>
-          group.failure === member.failure ||
-          (group.context === member.context && overlap(group.reviewIds, member.reviewIds) >= 0.58),
-      ),
+      cluster.groups.some((member) => groupsDescribeSameProblem(group, member)),
     );
     if (related) {
       related.groups.push(group);
@@ -389,9 +411,17 @@ function discoverThemes(reviews: Review[], minEvidence: number): Theme[] {
       const matched = [...cluster.reviewIds]
         .map((id) => byId.get(id))
         .filter((review): review is Review => !!review);
-      const leadCoverage = sharedFailure
-        ? 1
-        : lead.reviewIds.size / cluster.reviewIds.size;
+       const contextCounts = new Map<string, Set<string>>();
+       for (const group of rankedGroups) {
+         const key = group.context ?? "_";
+         const ids = contextCounts.get(key) ?? new Set<string>();
+         for (const id of group.reviewIds) ids.add(id);
+         contextCounts.set(key, ids);
+       }
+       const dominantContext = Math.max(...[...contextCounts.values()].map((ids) => ids.size));
+       const dominantContextShare = cluster.reviewIds.size ? dominantContext / cluster.reviewIds.size : 0;
+       const leadCoverage = lead.reviewIds.size / cluster.reviewIds.size;
+       const coherence = Math.min(1, leadCoverage * 0.55 + dominantContextShare * 0.45);
       const severe = new Set(rankedGroups.flatMap((group) => [...group.severeIds]));
 
       return {
@@ -401,12 +431,13 @@ function discoverThemes(reviews: Review[], minEvidence: number): Theme[] {
         problem: `Across ${matched.length.toLocaleString()} supporting reviews, customers repeatedly describe ${examples || `“${rawLabel}”`}. This cluster is based on recurring complaint expressions and their shared review evidence.`,
         context: lead.context,
         failure: lead.failure,
-        coherence: leadCoverage,
+         coherence,
         severityShare: matched.length ? severe.size / matched.length : 0,
         matched,
       } satisfies Theme;
     })
-    .filter((theme): theme is Theme => theme !== null)
+     .filter((theme): theme is Theme => theme !== null)
+     .filter((theme) => theme.coherence >= 0.58 && words(theme.label).length >= 2)
     .sort((a, b) => b.matched.length - a.matched.length || a.label.localeCompare(b.label))
     .filter((theme, index, all) => {
       const normalized = theme.label.toLowerCase();
@@ -495,6 +526,8 @@ function buildTrend(matched: Review[], time: TimeContext | null, minEvidence: nu
 
   const earlier = dated.filter((value) => value < time.split).length;
   const recent = dated.length - earlier;
+  const observationFloor = Math.max(3, Math.ceil(minEvidence * 0.25));
+  if (Math.max(earlier, recent) < observationFloor) return { evidence: false };
   const earlierRate = earlier / time.earlierReviews;
   const recentRate = recent / time.recentReviews;
   const changePct = earlierRate > 0 ? ((recentRate - earlierRate) / earlierRate) * 100 : null;
@@ -575,18 +608,18 @@ function buildOpportunity(theme: Theme, insight: Insight, excerpts: Excerpt[]): 
   const context = words(phrase).find((word) => stemWord(word) === contextStem) ?? contextStem;
   const statement =
     /slow|delay|late|lag|stuck|freez/.test(failureText)
-      ? `Test ways to make ${context} faster and more predictable, with progress or delay visibility when the recurring “${phrase}” condition occurs.`
+      ? `Test faster processing and progress visibility for ${context} when the recurring “${phrase}” condition occurs.`
       : /fail|error|broke|broken|crash|reject|not/.test(failureText)
-        ? `Test safeguards and a clear recovery path for the recurring “${phrase}” failure in ${context}.`
+        ? `Test prevention checks, clear failure status, and a recovery path for the recurring “${phrase}” problem.`
         : /wrong|incorrect|miss|lost/.test(failureText)
-          ? `Test validation and correction steps that prevent or quickly resolve the recurring “${phrase}” problem.`
+          ? `Test validation before completion and a correction path for the recurring “${phrase}” problem.`
           : /confus|hard|difficult/.test(failureText)
-            ? `Test clearer guidance and decision support around ${context} where reviews repeatedly describe “${phrase}”.`
+            ? `Test clearer guidance, status cues, and recovery choices where reviews repeatedly describe “${phrase}”.`
             : /expens|refund|waste/.test(failureText)
-              ? `Test clearer cost visibility, controls, and recovery around ${context} for reviews describing “${phrase}”.`
+              ? `Test clearer cost or outcome status and a self-serve resolution path for reviews describing “${phrase}”.`
               : /cancel/.test(failureText)
-                ? `Investigate why “${phrase}” recurs and test prevention, clearer accountability, and recovery steps.`
-                : `Test a targeted prevention and recovery intervention for the recurring “${phrase}” problem around ${context}.`;
+                ? `Test confirmation safeguards, timely status communication, and recovery options for the recurring “${phrase}” problem.`
+                : `Test an earlier warning and a guided recovery path for the recurring “${phrase}” problem around ${context}.`;
 
   return {
     evidence: true,
@@ -683,7 +716,11 @@ export function analyze(reviews: Review[]): Analysis {
   }));
 
   const trends = painPoints
-    .filter((pain) => pain.trend.evidence)
+    .filter((pain) =>
+      pain.trend.evidence &&
+      pain.trend.direction === "rising" &&
+      pain.trend.recent - pain.trend.earlier >= Math.max(3, Math.ceil(limits.trend * 0.12)),
+    )
     .map((pain) => {
       if (!pain.trend.evidence) return null;
       return {

@@ -19,6 +19,7 @@ export type CheckResult =
       ratio: number;
       status: "Pass" | "Warn" | "Fail";
       detail: string;
+      method: "exact" | "heuristic";
     };
 
 export type Flag = {
@@ -34,6 +35,8 @@ export type Evaluation = {
   grounding: CheckResult;
   consistency: CheckResult;
   relevance: CheckResult;
+  specificity: CheckResult;
+  opportunityGrounding: CheckResult;
   unsupportedClaims: { evaluated: boolean; count: number; checked: number };
   coverage: { evaluatedInsights: number; totalInsights: number; ratio: number | null };
   flags: Flag[];
@@ -45,7 +48,12 @@ const REVIEWS_PER_INSIGHT = 150;
 
 const notEvaluated: CheckResult = { evaluated: false };
 
-function result(passed: number, checked: number, detail: string): CheckResult {
+function result(
+  passed: number,
+  checked: number,
+  detail: string,
+  method: "exact" | "heuristic" = "exact",
+): CheckResult {
   if (checked === 0) return notEvaluated;
   const ratio = passed / checked;
   return {
@@ -55,6 +63,7 @@ function result(passed: number, checked: number, detail: string): CheckResult {
     ratio,
     status: ratio >= 0.95 ? "Pass" : ratio >= 0.8 ? "Warn" : "Fail",
     detail,
+    method,
   };
 }
 
@@ -73,6 +82,41 @@ function containsThemeWording(text: string, keywords: string[]): boolean {
   return keywords.some((keyword) => normalized.includes(searchable(keyword)));
 }
 
+const PROBLEM_CUES = /\b(?:annoy|awful|bad|block|broke|broken|cancel|confus|crash|delay|difficult|disappoint|error|expens|fail|fault|freez|frustrat|hard|hate|horribl|incorrect|issue|lag|late|lost|miss|poor|problem|refund|reject|ridicul|rude|scam|slow|spam|stuck|terribl|unaccept|unavail|unsafe|useless|waste|wrong|worst|cannot|can't|cant|doesn't|doesnt|don't|dont|never|unable|won't|wont)\w*\b/i;
+const VAGUE_WORDS = new Set([
+  "app","application","brand","business","company","customer","customers","experience","overall","platform","product","products","service","services","something","system","thing","things","user","users",
+]);
+const INTERVENTION_WORDS = /\b(?:test|prevent|validation|status|recovery|guidance|warning|confirmation|visibility|correction|resolution|safeguard|communication|options?|controls?|processing|path)\b/i;
+
+function contentWords(text: string): string[] {
+  return searchable(text).split(" ").filter((word) => word.length > 2 && !VAGUE_WORDS.has(word));
+}
+
+function reviewSupportsProblem(text: string, pain: PainPoint): boolean {
+  if (!PROBLEM_CUES.test(text)) return false;
+  const evidenceWords = new Set(pain.keywords.flatMap(contentWords));
+  const reviewWords = new Set(contentWords(text));
+  let shared = 0;
+  for (const word of evidenceWords) if (reviewWords.has(word)) shared += 1;
+  return shared >= 2 || pain.keywords.some((keyword) => containsThemeWording(text, [keyword]));
+}
+
+function isSpecificProblem(pain: PainPoint): boolean {
+  const labelWords = contentWords(pain.label);
+  const evidenceWords = new Set(pain.keywords.flatMap(contentWords));
+  return labelWords.length >= 2 && evidenceWords.size >= 2 && PROBLEM_CUES.test(pain.keywords.join(" "));
+}
+
+function normalizedOverlap(a: string, b: string): number {
+  const left = new Set(contentWords(a));
+  const right = new Set(contentWords(b));
+  const union = new Set([...left, ...right]);
+  if (union.size === 0) return 0;
+  let shared = 0;
+  for (const word of left) if (right.has(word)) shared += 1;
+  return shared / union.size;
+}
+
 export function evaluate(reviews: Review[], analysis: Analysis): Evaluation {
   const byId = new Map(reviews.map((r) => [r.id, r]));
   const sampled: PainPoint[] = analysis.painPoints;
@@ -83,6 +127,10 @@ export function evaluate(reviews: Review[], analysis: Analysis): Evaluation {
   let consistentChecked = 0;
   let relevantPass = 0;
   let relevantChecked = 0;
+  let specificPass = 0;
+  let specificChecked = 0;
+  let opportunityPass = 0;
+  let opportunityChecked = 0;
   let unsupported = 0;
   let claimsChecked = 0;
   let evaluatedInsights = 0;
@@ -109,14 +157,15 @@ export function evaluate(reviews: Review[], analysis: Analysis): Evaluation {
       });
     }
 
-    // 2. Theme consistency: linked reviews must contain the wording that matched.
+    // 2. Heuristic semantic consistency: linked reviews must express the same
+    // problem proposition, not merely repeat one isolated word.
     const sample = pain.reviewIds.slice(0, REVIEWS_PER_INSIGHT);
     const offTheme: string[] = [];
     for (const id of sample) {
       const r = byId.get(id);
       if (!r) continue;
       consistentChecked += 1;
-      if (containsThemeWording(r.text, pain.keywords)) consistentPass += 1;
+      if (reviewSupportsProblem(r.text, pain)) consistentPass += 1;
       else if (offTheme.length < 3) offTheme.push(id);
     }
     if (offTheme.length > 0) {
@@ -124,7 +173,7 @@ export function evaluate(reviews: Review[], analysis: Analysis): Evaluation {
         insightId: pain.id,
         insightLabel: pain.label,
         reviewIds: offTheme,
-        reason: `Linked review text contains none of the wording behind "${pain.label}".`,
+        reason: `Sampled linked reviews do not consistently express the underlying problem described by "${pain.label}".`,
       });
     }
 
@@ -135,7 +184,7 @@ export function evaluate(reviews: Review[], analysis: Analysis): Evaluation {
       const snippet = clean(ex.text);
       const linked = pain.reviewIds.includes(ex.reviewId);
       const verbatim = !!r && r.text.toLowerCase().includes(snippet);
-      const onTheme = containsThemeWording(snippet, pain.keywords);
+      const onTheme = reviewSupportsProblem(snippet, pain);
       if (linked && verbatim && onTheme) relevantPass += 1;
       else {
         flags.push({
@@ -148,7 +197,7 @@ export function evaluate(reviews: Review[], analysis: Analysis): Evaluation {
               ? "Excerpt text is not a verbatim span of the cited review."
               : !linked
                 ? "Excerpt review is not in this insight's supporting review list."
-                : "Excerpt does not contain the wording the insight is about.",
+                : "Excerpt does not provide clear evidence for the underlying customer problem.",
         });
       }
     }
@@ -207,6 +256,27 @@ export function evaluate(reviews: Review[], analysis: Analysis): Evaluation {
           reason: "Opportunity cites review IDs that are not in the connected dataset.",
         });
       }
+
+      opportunityChecked += 1;
+      const outside = pain.opportunity.reviewIds.filter((id) => !pain.reviewIds.includes(id));
+      const excerptOutside = pain.opportunity.excerpts.filter(
+        (item) => !pain.opportunity.reviewIds.includes(item.reviewId),
+      );
+      const problemConnection = pain.keywords.some(
+        (keyword) => normalizedOverlap(pain.opportunity.evidence ? pain.opportunity.statement : "", keyword) >= 0.12,
+      );
+      const notParaphrase = normalizedOverlap(pain.opportunity.statement, pain.label) < 0.72;
+      const actionable = INTERVENTION_WORDS.test(pain.opportunity.statement);
+      if (outside.length === 0 && excerptOutside.length === 0 && problemConnection && notParaphrase && actionable) {
+        opportunityPass += 1;
+      } else {
+        flags.push({
+          insightId: pain.id,
+          insightLabel: pain.label,
+          reviewIds: pain.opportunity.reviewIds.slice(0, 3),
+          reason: "Potential opportunity is generic, repetitive, unsupported, or not clearly connected to the evidenced customer problem.",
+        });
+      }
     }
 
     claimsChecked += 1;
@@ -222,13 +292,46 @@ export function evaluate(reviews: Review[], analysis: Analysis): Evaluation {
     }
 
     if (insightEvaluated) evaluatedInsights += 1;
+
+    specificChecked += 1;
+    if (isSpecificProblem(pain)) specificPass += 1;
+    else {
+      flags.push({
+        insightId: pain.id,
+        insightLabel: pain.label,
+        reviewIds: pain.reviewIds.slice(0, 3),
+        reason: "Insight wording is too generic or does not describe a concrete customer problem.",
+      });
+    }
   }
 
   const grounding = result(groundedPass, groundedChecked, "Linked review IDs resolving to real review text");
-  const consistency = result(consistentPass, consistentChecked, "Linked reviews containing the theme wording");
-  const relevance = result(relevantPass, relevantChecked, "Excerpts that are verbatim, linked and on-theme");
+  const consistency = result(
+    consistentPass,
+    consistentChecked,
+    "Linked reviews expressing a compatible problem proposition (deterministic linguistic heuristic)",
+    "heuristic",
+  );
+  const relevance = result(
+    relevantPass,
+    relevantChecked,
+    "Excerpts that are verbatim, linked, and relevant to the underlying problem",
+    "heuristic",
+  );
+  const specificity = result(
+    specificPass,
+    specificChecked,
+    "Insights describing a concrete problem rather than an entity, noun, or vague phrase",
+    "heuristic",
+  );
+  const opportunityGrounding = result(
+    opportunityPass,
+    opportunityChecked,
+    "Opportunity hypotheses linked to the problem evidence, specific, and distinct from the pain-point title",
+    "heuristic",
+  );
 
-  const checks = [grounding, consistency, relevance].filter(
+  const checks = [grounding, consistency, relevance, specificity, opportunityGrounding].filter(
     (c): c is Extract<CheckResult, { evaluated: true }> => c.evaluated,
   );
 
@@ -250,6 +353,8 @@ export function evaluate(reviews: Review[], analysis: Analysis): Evaluation {
     grounding,
     consistency,
     relevance,
+    specificity,
+    opportunityGrounding,
     unsupportedClaims: { evaluated: claimsChecked > 0, count: unsupported, checked: claimsChecked },
     coverage: {
       evaluatedInsights,
