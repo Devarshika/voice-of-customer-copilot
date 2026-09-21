@@ -67,7 +67,7 @@ const STOPWORDS = new Set([
 ]);
 
 const BROAD_CONTEXT = new Set([
-  "able","app","application","brand","business","company","customer","customers","experience","know","let","platform","product","products","service","services","system","thing","things","use","user","users","way","work",
+  "able","app","application","brand","business","company","customer","customers","experience","find","good","keep","know","let","one","platform","product","products","select","service","services","system","thing","things","use","user","users","want","way","work",
 ]);
 
 // Generic expressions of failure or friction. These identify complaint
@@ -140,6 +140,7 @@ function stemWord(word: string): string {
   else if (value.length > 4 && value.endsWith("ed")) value = value.slice(0, -2);
   else if (value.length > 4 && value.endsWith("es")) value = value.slice(0, -2);
   else if (value.length > 3 && value.endsWith("s")) value = value.slice(0, -1);
+  if (value === "cancell") value = "cancel";
   return value;
 }
 
@@ -237,8 +238,18 @@ function extractSignals(review: Review, common: Set<string>): Signal[] {
       }
 
       const nearby = list
-        .filter((token) => Math.abs(token.index - failureIndex) <= 5 && informative(token, common))
+        .filter(
+          (token) =>
+            token.index !== failureIndex &&
+            Math.abs(token.index - failureIndex) <= 5 &&
+            informative(token, common),
+        )
         .sort((a, b) => {
+          // The object immediately before a complaint cue is generally more
+          // descriptive than an auxiliary verb immediately after it.
+          const sideA = a.index < failureIndex ? 0 : 1;
+          const sideB = b.index < failureIndex ? 0 : 1;
+          if (sideA !== sideB) return sideA - sideB;
           const distance = Math.abs(a.index - failureIndex) - Math.abs(b.index - failureIndex);
           return distance !== 0 ? distance : a.index - b.index;
         });
@@ -323,8 +334,8 @@ function discoverThemes(reviews: Review[], minEvidence: number): Theme[] {
     const related = clusters.find((cluster) =>
       cluster.groups.some(
         (member) =>
-          overlap(group.reviewIds, member.reviewIds) >= 0.58 &&
-          (group.context === member.context || group.failure === member.failure),
+          group.failure === member.failure ||
+          (group.context === member.context && overlap(group.reviewIds, member.reviewIds) >= 0.58),
       ),
     );
     if (related) {
@@ -359,20 +370,28 @@ function discoverThemes(reviews: Review[], minEvidence: number): Theme[] {
           return true;
         })
         .slice(0, 5);
+      const contexts = [...new Set(rankedGroups.map((group) => group.context).filter(Boolean))] as string[];
+      const sharedFailure = rankedGroups.every((group) => group.failure === lead.failure);
       const fallback = [lead.context, lead.failure.replace(/^not-/, "not ")].filter(Boolean).join(" ");
-      const rawLabel = labelWords.length >= 2 ? labelWords.join(" ") : fallback || representative;
+      const rawLabel =
+        sharedFailure && contexts.length > 1
+          ? `${contexts.slice(0, 2).join(" & ")} ${lead.failure.replace(/^not-/, "not ")}`
+          : labelWords.length >= 2
+            ? labelWords.join(" ")
+            : fallback || representative;
       const label = rawLabel.replace(/\b\p{L}/gu, (char) => char.toUpperCase());
       const keywords = [...new Set(rankedGroups.flatMap((group) =>
         [...group.phrases.entries()]
           .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-          .slice(0, 2)
           .map(([phrase]) => phrase),
       ))];
       const examples = keywords.slice(0, 3).map((phrase) => `“${phrase}”`).join(", ");
       const matched = [...cluster.reviewIds]
         .map((id) => byId.get(id))
         .filter((review): review is Review => !!review);
-      const leadCoverage = lead.reviewIds.size / cluster.reviewIds.size;
+      const leadCoverage = sharedFailure
+        ? 1
+        : lead.reviewIds.size / cluster.reviewIds.size;
       const severe = new Set(rankedGroups.flatMap((group) => [...group.severeIds]));
 
       return {
