@@ -67,7 +67,7 @@ const STOPWORDS = new Set([
 ]);
 
 const BROAD_CONTEXT = new Set([
-  "app","application","brand","business","company","customer","customers","experience","platform","product","products","service","services","system","thing","things","user","users",
+  "able","app","application","brand","business","company","customer","customers","experience","know","let","platform","product","products","service","services","system","thing","things","use","user","users","way","work",
 ]);
 
 // Generic expressions of failure or friction. These identify complaint
@@ -243,9 +243,14 @@ function extractSignals(review: Review, common: Set<string>): Signal[] {
           return distance !== 0 ? distance : a.index - b.index;
         });
       const contextToken = nearby[0] ?? null;
-      if (!contextToken && !isProblemToken(list[failureIndex] ?? current)) continue;
+      // A complaint word without an object or context (for example “worst” or
+      // “bad”) is sentiment, not a customer problem.
+      if (!contextToken) continue;
 
       const context = contextToken?.stem ?? null;
+      if (!context || context === failure || failure.startsWith(context) || context.startsWith(failure)) {
+        continue;
+      }
       const left = contextToken ? Math.min(contextToken.index, cueStart) : cueStart;
       const right = Math.max(contextToken?.index ?? failureIndex, failureIndex);
       const boundedLeft = Math.max(0, right - 6, left);
@@ -281,7 +286,9 @@ function overlap(a: Set<string>, b: Set<string>): number {
 function discoverThemes(reviews: Review[], minEvidence: number): Theme[] {
   if (reviews.length === 0) return [];
   const frequency = documentFrequency(reviews);
-  const commonCutoff = Math.max(8, Math.round(reviews.length * 0.16));
+  // Remove near-universal corpus terms (often the uploaded product name), but
+  // retain recurring problem objects that naturally occur in one large theme.
+  const commonCutoff = Math.max(20, Math.round(reviews.length * 0.45));
   const common = new Set(
     [...frequency.entries()].filter(([, count]) => count >= commonCutoff).map(([term]) => term),
   );
@@ -342,8 +349,15 @@ function discoverThemes(reviews: Review[], minEvidence: number): Theme[] {
       );
       phraseEntries.sort((a, b) => b.count - a.count || a.phrase.localeCompare(b.phrase));
       const representative = phraseEntries[0]?.phrase ?? lead.failure.replace(/^not-/, "not ");
+      const uniqueStems = new Set<string>();
       const labelWords = words(representative)
         .filter((word) => !STOPWORDS.has(word) && !BROAD_CONTEXT.has(stemWord(word)))
+        .filter((word) => {
+          const stem = stemWord(word);
+          if (uniqueStems.has(stem)) return false;
+          uniqueStems.add(stem);
+          return true;
+        })
         .slice(0, 5);
       const fallback = [lead.context, lead.failure.replace(/^not-/, "not ")].filter(Boolean).join(" ");
       const rawLabel = labelWords.length >= 2 ? labelWords.join(" ") : fallback || representative;
@@ -538,9 +552,26 @@ function buildOpportunity(theme: Theme, insight: Insight, excerpts: Excerpt[]): 
   const evidencePhrase = theme.keywords[0];
   if (!evidencePhrase || words(evidencePhrase).length < 2) return { evidence: false };
 
+  const phrase = evidencePhrase.replace(/[“”]/g, "");
+  const failure = theme.failure.replace(/^not-/, "not ");
+  const statement =
+    /slow|delay|late|lag|stuck|freez/.test(failure)
+      ? `Test ways to make ${context} faster and more predictable, with progress or delay visibility when the recurring “${phrase}” condition occurs.`
+      : /fail|error|broke|broken|crash|reject|not/.test(failure)
+        ? `Test safeguards and a clear recovery path for the recurring “${phrase}” failure in ${context}.`
+        : /wrong|incorrect|miss|lost/.test(failure)
+          ? `Test validation and correction steps that prevent or quickly resolve the recurring “${phrase}” problem.`
+          : /confus|hard|difficult/.test(failure)
+            ? `Test clearer guidance and decision support around ${context} where reviews repeatedly describe “${phrase}”.`
+            : /expens|refund|waste/.test(failure)
+              ? `Test clearer cost visibility, controls, and recovery around ${context} for reviews describing “${phrase}”.`
+              : /cancel/.test(failure)
+                ? `Investigate why “${phrase}” recurs and test prevention plus recovery steps around ${context}.`
+                : `Test a targeted prevention and recovery intervention for the recurring “${phrase}” problem around ${context}.`;
+
   return {
     evidence: true,
-    statement: `Investigate the ${context} experience and test an intervention that addresses the recurring “${evidencePhrase}” failure, including prevention and recovery where appropriate.`,
+    statement,
     reviewIds: insight.reviewIds,
     excerpts: excerpts.slice(0, 3),
   };
