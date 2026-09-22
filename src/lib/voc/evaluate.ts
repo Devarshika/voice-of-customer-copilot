@@ -84,7 +84,7 @@ function containsThemeWording(text: string, keywords: string[]): boolean {
 
 const PROBLEM_CUES = /\b(?:annoy|awful|bad|block|broke|broken|cancel|confus|crash|delay|difficult|disappoint|error|expens|fail|fault|freez|frustrat|hard|hate|horribl|incorrect|issue|lag|late|lost|miss|poor|problem|refund|reject|ridicul|rude|scam|slow|spam|stuck|terribl|unaccept|unavail|unsafe|useless|waste|wrong|worst|cannot|can't|cant|doesn't|doesnt|don't|dont|never|unable|won't|wont)\w*\b/i;
 const VAGUE_WORDS = new Set([
-  "app","application","brand","business","company","customer","customers","experience","overall","platform","product","products","service","services","something","system","thing","things","user","users",
+  "anything","app","application","brand","business","company","customer","customers","everything","experience","nothing","overall","platform","product","products","service","services","something","system","thing","things","user","users",
 ]);
 const INTERVENTION_WORDS = /\b(?:test|prevent|validation|status|recovery|guidance|warning|confirmation|visibility|correction|resolution|safeguard|communication|options?|controls?|processing|path)\b/i;
 
