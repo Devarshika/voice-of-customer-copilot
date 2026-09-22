@@ -67,7 +67,7 @@ const STOPWORDS = new Set([
 ]);
 
 const BROAD_CONTEXT = new Set([
-  "able","anything","app","application","arrive","brand","business","company","customer","customers","day","days","end","ends","everything","experience","find","good","hour","hours","keep","know","let","minute","minutes","month","months","one","overall","platform","product","products","select","service","services","show","shows","something","system","thing","things","time","times","use","user","users","want","way","week","weeks","went","whole","work",
+  "able","anyth","anything","app","application","arrive","brand","business","company","customer","customers","day","days","end","ends","everyth","everything","experience","find","good","hour","hours","keep","know","let","minute","minutes","month","months","noth","nothing","one","overall","platform","product","products","select","service","services","show","shows","someth","something","system","thing","things","time","times","use","user","users","want","way","week","weeks","went","whole","work",
 ]);
 
 // Generic expressions of failure or friction. These identify complaint
@@ -615,17 +615,19 @@ function buildOpportunity(theme: Theme, insight: Insight, excerpts: Excerpt[]): 
   const statement =
     /slow|delay|late|lag|stuck|freez/.test(failureText)
       ? `Test faster processing and progress visibility for ${context} when the recurring “${phrase}” condition occurs.`
-      : /fail|error|broke|broken|crash|reject|not/.test(failureText)
+       : /confus|hard|difficult|understand/.test(failureText)
+         ? `Test clearer guidance, status cues, and recovery choices where reviews repeatedly describe “${phrase}”.`
+         : /fail|error|broke|broken|crash|reject|not/.test(failureText)
         ? `Test prevention checks, clear failure status, and a recovery path for the recurring “${phrase}” problem.`
         : /wrong|incorrect|miss|lost/.test(failureText)
           ? `Test validation before completion and a correction path for the recurring “${phrase}” problem.`
-          : /confus|hard|difficult/.test(failureText)
-            ? `Test clearer guidance, status cues, and recovery choices where reviews repeatedly describe “${phrase}”.`
-            : /expens|refund|waste/.test(failureText)
+          : /expens|refund|waste/.test(failureText)
               ? `Test clearer cost or outcome status and a self-serve resolution path for reviews describing “${phrase}”.`
               : /cancel/.test(failureText)
                 ? `Test confirmation safeguards, timely status communication, and recovery options for the recurring “${phrase}” problem.`
-                : `Test an earlier warning and a guided recovery path for the recurring “${phrase}” problem around ${context}.`;
+                : null;
+
+  if (!statement) return { evidence: false };
 
   return {
     evidence: true,
