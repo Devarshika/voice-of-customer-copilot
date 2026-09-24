@@ -86,7 +86,7 @@ export function EvaluationPanel({
           </div>
           <div className="mt-1 text-[10.5px] text-ink-soft">
             of {evaluation.sample.insightsAvailable.toLocaleString()} available ·{" "}
-            {evaluation.sample.reviewsChecked.toLocaleString()} linked reviews inspected
+            {evaluation.sample.reviewsChecked.toLocaleString()} linked reviews inspected · {evaluation.unsupportedClaims.checked.toLocaleString()} claims checked · {evaluation.flags.length.toLocaleString()} quality issues flagged
           </div>
         </div>
         <div className="frost-inset rounded-xl p-3">

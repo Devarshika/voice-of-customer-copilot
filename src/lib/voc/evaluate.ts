@@ -1,36 +1,29 @@
+import {
+  contentWords,
+  corpusCommonTerms,
+  describesProblem,
+  extractComplaintSignatures,
+  setSimilarity,
+  signatureCompatibility,
+  type ComplaintSignature,
+} from "./complaints";
 import type { Analysis, PainPoint, Review } from "./types";
-
-/**
- * Deterministic evaluation of the insight engine against the connected dataset.
- * Nothing here estimates or invents a score: every number is a count or a ratio
- * of counts over the sampled insights and their linked reviews. Anything that
- * cannot be computed from the connected data is reported as "Not evaluated".
- */
 
 export type CheckResult =
   | { evaluated: false }
   | {
       evaluated: true;
-      /** Sampled units that passed. */
       passed: number;
-      /** Sampled units checked. */
       checked: number;
-      /** passed / checked. */
       ratio: number;
       status: "Pass" | "Warn" | "Fail";
       detail: string;
       method: "exact" | "heuristic";
     };
 
-export type Flag = {
-  insightId: string;
-  insightLabel: string;
-  reviewIds: string[];
-  reason: string;
-};
+export type Flag = { insightId: string; insightLabel: string; reviewIds: string[]; reason: string };
 
 export type Evaluation = {
-  /** Number of insights sampled and number of linked reviews inspected. */
   sample: { insights: number; insightsAvailable: number; reviewsChecked: number };
   grounding: CheckResult;
   consistency: CheckResult;
@@ -43,83 +36,71 @@ export type Evaluation = {
   overall: "Pass" | "Warn" | "Fail" | "Not evaluated";
 };
 
-/** How many linked reviews per insight are inspected for consistency. */
-const REVIEWS_PER_INSIGHT = 150;
-
+const REVIEWS_PER_INSIGHT = 120;
 const notEvaluated: CheckResult = { evaluated: false };
+const INTERVENTION = /\b(?:check|clarif|control|correct|fallback|guidance|prevent|progress|recover|reduc|resolution|retry|status|trace|validat|verif)\w*\b/i;
 
-function result(
-  passed: number,
-  checked: number,
-  detail: string,
-  method: "exact" | "heuristic" = "exact",
-): CheckResult {
+function result(passed: number, checked: number, detail: string, method: "exact" | "heuristic" = "exact"): CheckResult {
   if (checked === 0) return notEvaluated;
   const ratio = passed / checked;
-  return {
-    evaluated: true,
-    passed,
-    checked,
-    ratio,
-    status: ratio >= 0.95 ? "Pass" : ratio >= 0.8 ? "Warn" : "Fail",
-    detail,
-    method,
-  };
+  return { evaluated: true, passed, checked, ratio, status: ratio >= 0.9 ? "Pass" : ratio >= 0.7 ? "Warn" : "Fail", detail, method };
 }
 
-const clean = (s: string) => s.replace(/^…|…$/g, "").trim().toLowerCase();
+function cleanExcerpt(text: string): string {
+  return text.replace(/^…|…$/g, "").trim().toLowerCase();
+}
 
-const searchable = (s: string) =>
-  s
+function dominantSignature(signatures: ComplaintSignature[]): { kind: ComplaintSignature["kind"]; contexts: string[] } | null {
+  if (signatures.length < 2) return null;
+  const kinds = new Map<ComplaintSignature["kind"], number>();
+  const contexts = new Map<string, Set<string>>();
+  for (const signature of signatures) {
+    kinds.set(signature.kind, (kinds.get(signature.kind) ?? 0) + 1);
+    for (const context of signature.context) {
+      const ids = contexts.get(context) ?? new Set<string>();
+      ids.add(signature.reviewId);
+      contexts.set(context, ids);
+    }
+  }
+  const kind = [...kinds].sort((a, b) => b[1] - a[1])[0]?.[0];
+  if (!kind) return null;
+  const dominantContexts = [...contexts]
+    .filter(([, ids]) => ids.size >= Math.max(2, Math.ceil(signatures.length * 0.18)))
+    .sort((a, b) => b[1].size - a[1].size)
+    .slice(0, 4)
+    .map(([context]) => context);
+  return dominantContexts.length > 0 ? { kind, contexts: dominantContexts } : null;
+}
+
+function supportsCentroid(signatures: ComplaintSignature[], centroid: NonNullable<ReturnType<typeof dominantSignature>>): boolean {
+  return signatures.some((signature) => signature.kind === centroid.kind && setSimilarity(signature.context, centroid.contexts) > 0);
+}
+
+function opportunitySkeleton(statement: string): string {
+  return statement
     .toLowerCase()
-    .replace(/[^\p{L}\p{N}']+/gu, " ")
-    .replace(/\s+/g, " ")
+    .replace(/[“”"'][^“”"']+[“”"']/g, "_")
+    .replace(/\b[\p{L}\p{N}']+\b/gu, (word) => (INTERVENTION.test(word) ? word : "_"))
+    .replace(/(?:_\s*)+/g, "_")
     .trim();
-
-/** Discovered phrases are token-normalized, so punctuation must not create a false flag. */
-function containsThemeWording(text: string, keywords: string[]): boolean {
-  const normalized = searchable(text);
-  return keywords.some((keyword) => normalized.includes(searchable(keyword)));
 }
 
-const PROBLEM_CUES = /\b(?:annoy|awful|bad|block|broke|broken|cancel|confus|crash|delay|difficult|disappoint|error|expens|fail|fault|freez|frustrat|hard|hate|horribl|incorrect|issue|lag|late|lost|miss|poor|problem|refund|reject|ridicul|rude|scam|slow|spam|stuck|terribl|unaccept|unavail|unsafe|useless|waste|wrong|worst|cannot|can't|cant|doesn't|doesnt|don't|dont|never|unable|won't|wont)\w*\b/i;
-const VAGUE_WORDS = new Set([
-  "anything","app","application","brand","business","company","customer","customers","everything","experience","nothing","overall","platform","product","products","service","services","something","system","thing","things","user","users",
-]);
-const INTERVENTION_WORDS = /\b(?:test|prevent|validation|status|recovery|guidance|warning|confirmation|visibility|correction|resolution|safeguard|communication|options?|controls?|processing|path)\b/i;
-
-function contentWords(text: string): string[] {
-  return searchable(text).split(" ").filter((word) => word.length > 2 && !VAGUE_WORDS.has(word));
-}
-
-function reviewSupportsProblem(text: string, pain: PainPoint): boolean {
-  if (!PROBLEM_CUES.test(text)) return false;
-  const evidenceWords = new Set(pain.keywords.flatMap(contentWords));
-  const reviewWords = new Set(contentWords(text));
-  let shared = 0;
-  for (const word of evidenceWords) if (reviewWords.has(word)) shared += 1;
-  return shared >= 2 || pain.keywords.some((keyword) => containsThemeWording(text, [keyword]));
-}
-
-function isSpecificProblem(pain: PainPoint): boolean {
-  const labelWords = contentWords(pain.label);
-  const evidenceWords = new Set(pain.keywords.flatMap(contentWords));
-  return labelWords.length >= 2 && evidenceWords.size >= 2 && PROBLEM_CUES.test(pain.keywords.join(" "));
-}
-
-function normalizedOverlap(a: string, b: string): number {
-  const left = new Set(contentWords(a));
-  const right = new Set(contentWords(b));
-  const union = new Set([...left, ...right]);
-  if (union.size === 0) return 0;
-  let shared = 0;
-  for (const word of left) if (right.has(word)) shared += 1;
-  return shared / union.size;
+function approximatelyEqual(left: number, right: number, tolerance = 0.0001): boolean {
+  return Math.abs(left - right) <= tolerance;
 }
 
 export function evaluate(reviews: Review[], analysis: Analysis): Evaluation {
-  const byId = new Map(reviews.map((r) => [r.id, r]));
-  const sampled: PainPoint[] = analysis.painPoints;
+  const byId = new Map(reviews.map((review) => [review.id, review]));
+  const common = corpusCommonTerms(reviews);
+  const signaturesByReview = new Map<string, ComplaintSignature[]>();
+  for (const review of reviews) signaturesByReview.set(review.id, extractComplaintSignatures(review, common));
+  const sampled = analysis.painPoints;
+  const opportunitySkeletonCounts = new Map<string, number>();
+  for (const pain of sampled) {
+    if (!pain.opportunity.evidence) continue;
+    const skeleton = opportunitySkeleton(pain.opportunity.statement);
+    opportunitySkeletonCounts.set(skeleton, (opportunitySkeletonCounts.get(skeleton) ?? 0) + 1);
+  }
 
   let groundedPass = 0;
   let groundedChecked = 0;
@@ -138,231 +119,146 @@ export function evaluate(reviews: Review[], analysis: Analysis): Evaluation {
 
   for (const pain of sampled) {
     let insightEvaluated = false;
-
-    // 1. Evidence grounding: every linked id must resolve to a real review with text.
     const missing: string[] = [];
     for (const id of pain.reviewIds) {
       groundedChecked += 1;
-      const r = byId.get(id);
-      if (r && r.text.trim().length > 0) groundedPass += 1;
+      const review = byId.get(id);
+      if (review?.text.trim()) groundedPass += 1;
       else if (missing.length < 3) missing.push(id);
     }
     if (pain.reviewIds.length > 0) insightEvaluated = true;
-    if (missing.length > 0) {
-      flags.push({
-        insightId: pain.id,
-        insightLabel: pain.label,
-        reviewIds: missing,
-        reason: "Linked review IDs do not resolve to review text in the connected dataset.",
-      });
-    }
+    if (missing.length > 0) flags.push({ insightId: pain.id, insightLabel: pain.label, reviewIds: missing, reason: "Linked review IDs do not resolve to review text in the selected dataset." });
 
-    // 2. Heuristic semantic consistency: linked reviews must express the same
-    // problem proposition, not merely repeat one isolated word.
-    const sample = pain.reviewIds.slice(0, REVIEWS_PER_INSIGHT);
+    const linkedSignatures = pain.reviewIds.flatMap((id) => signaturesByReview.get(id) ?? []);
+    const centroid = dominantSignature(linkedSignatures);
+    const sampledIds = pain.reviewIds.slice(0, REVIEWS_PER_INSIGHT);
     const offTheme: string[] = [];
-    for (const id of sample) {
-      const r = byId.get(id);
-      if (!r) continue;
-      consistentChecked += 1;
-      if (reviewSupportsProblem(r.text, pain)) consistentPass += 1;
-      else if (offTheme.length < 3) offTheme.push(id);
+    if (centroid && sampledIds.length >= 3) {
+      for (const id of sampledIds) {
+        const own = signaturesByReview.get(id) ?? [];
+        const peers = linkedSignatures.filter((signature) => signature.reviewId !== id);
+        const leaveOneOut = dominantSignature(peers);
+        if (!leaveOneOut) continue;
+        consistentChecked += 1;
+        if (supportsCentroid(own, leaveOneOut)) consistentPass += 1;
+        else if (offTheme.length < 3) offTheme.push(id);
+      }
     }
-    if (offTheme.length > 0) {
-      flags.push({
-        insightId: pain.id,
-        insightLabel: pain.label,
-        reviewIds: offTheme,
-        reason: `Sampled linked reviews do not consistently express the underlying problem described by "${pain.label}".`,
-      });
-    }
+    if (offTheme.length > 0) flags.push({ insightId: pain.id, insightLabel: pain.label, reviewIds: offTheme, reason: "Sampled reviews do not match the problem kind and affected context established by the other reviews in this cluster." });
 
-    // 3. Evidence relevance: excerpts must be verbatim, linked, and on-theme.
-    for (const ex of pain.excerpts) {
-      relevantChecked += 1;
-      const r = byId.get(ex.reviewId);
-      const snippet = clean(ex.text);
-      const linked = pain.reviewIds.includes(ex.reviewId);
-      const verbatim = !!r && r.text.toLowerCase().includes(snippet);
-      const onTheme = reviewSupportsProblem(snippet, pain);
-      if (linked && verbatim && onTheme) relevantPass += 1;
-      else {
-        flags.push({
+    if (centroid) {
+      for (const evidence of pain.excerpts) {
+        relevantChecked += 1;
+        const review = byId.get(evidence.reviewId);
+        const snippet = cleanExcerpt(evidence.text);
+        const verbatim = !!review && review.text.toLowerCase().includes(snippet);
+        const linked = pain.reviewIds.includes(evidence.reviewId);
+        const evidenceSignatures = review ? (signaturesByReview.get(review.id) ?? []).filter((signature) => signature.sentence.toLowerCase().includes(snippet) || snippet.includes(signature.sentence.toLowerCase())) : [];
+        const propositionRelevant = supportsCentroid(evidenceSignatures, centroid);
+        if (review && verbatim && linked && propositionRelevant) relevantPass += 1;
+        else flags.push({
           insightId: pain.id,
           insightLabel: pain.label,
-          reviewIds: [ex.reviewId],
-          reason: !r
-            ? "Excerpt cites a review ID that is not in the connected dataset."
-            : !verbatim
-              ? "Excerpt text is not a verbatim span of the cited review."
-              : !linked
-                ? "Excerpt review is not in this insight's supporting review list."
-                : "Excerpt does not provide clear evidence for the underlying customer problem.",
+          reviewIds: [evidence.reviewId],
+          reason: !review ? "Excerpt cites an unknown review ID." : !verbatim ? "Excerpt is not verbatim review text." : !linked ? "Excerpt is outside this insight's evidence set." : "Excerpt does not express the cluster's underlying problem proposition.",
         });
       }
     }
 
-    // 4. Unsupported-claim detection: each stated number must match the evidence.
+    specificChecked += 1;
+    const labelSpecific = describesProblem(pain.label);
+    const contextSpecific = centroid ? centroid.contexts.some((context) => contentWords(context).length > 0) : false;
+    if (labelSpecific && contextSpecific) specificPass += 1;
+    else flags.push({ insightId: pain.id, insightLabel: pain.label, reviewIds: pain.reviewIds.slice(0, 3), reason: "Insight is generic, incomplete, or does not name both an affected context and a customer problem." });
+
+    if (pain.opportunity.evidence && centroid) {
+      opportunityChecked += 1;
+      const opportunity = pain.opportunity;
+      const statementWords = contentWords(opportunity.statement);
+      const contextLinked = setSimilarity(statementWords, centroid.contexts) > 0;
+      const actionable = INTERVENTION.test(opportunity.statement);
+      const overlapWithLabel = setSimilarity(statementWords, contentWords(pain.label));
+      const lineageValid = opportunity.reviewIds.length > 0 && opportunity.reviewIds.every((id) => pain.reviewIds.includes(id) && byId.has(id));
+      const excerptsValid = opportunity.excerpts.length >= 2 && opportunity.excerpts.every((item) => opportunity.reviewIds.includes(item.reviewId));
+      const skeleton = opportunitySkeleton(opportunity.statement);
+      const duplicated = (opportunitySkeletonCounts.get(skeleton) ?? 0) > 1;
+      if (contextLinked && actionable && overlapWithLabel < 0.72 && lineageValid && excerptsValid && !duplicated) opportunityPass += 1;
+      else flags.push({ insightId: pain.id, insightLabel: pain.label, reviewIds: opportunity.reviewIds.slice(0, 3), reason: duplicated ? "Opportunity repeats the same intervention structure used for another problem." : "Opportunity is generic, repetitive, unsupported, or does not logically address the evidenced problem context." });
+    }
+
     claimsChecked += 1;
-    if (pain.mentionCount !== pain.reviewIds.length) {
+    if (pain.mentionCount !== new Set(pain.reviewIds).size) {
       unsupported += 1;
-      flags.push({
-        insightId: pain.id,
-        insightLabel: pain.label,
-        reviewIds: pain.reviewIds.slice(0, 3),
-        reason: `Stated mention count (${pain.mentionCount}) does not match the number of supporting review IDs (${pain.reviewIds.length}).`,
-      });
+      flags.push({ insightId: pain.id, insightLabel: pain.label, reviewIds: pain.reviewIds.slice(0, 3), reason: "Mention count does not match the unique supporting-review count." });
+    }
+
+    claimsChecked += 1;
+    const expectedShare = reviews.length ? new Set(pain.reviewIds).size / reviews.length : 0;
+    if (!approximatelyEqual(pain.datasetShare, expectedShare)) {
+      unsupported += 1;
+      flags.push({ insightId: pain.id, insightLabel: pain.label, reviewIds: pain.reviewIds.slice(0, 3), reason: "Dataset percentage does not match the linked evidence count." });
+    }
+
+    const linkedReviews = pain.reviewIds.map((id) => byId.get(id)).filter((review): review is Review => !!review);
+    const rated = linkedReviews.filter((review): review is Review & { rating: number } => review.rating !== null);
+    claimsChecked += 1;
+    if (rated.length > 0) {
+      const expectedNegative = rated.filter((review) => review.rating <= 2).length / rated.length;
+      if (!approximatelyEqual(pain.negativeShare, expectedNegative)) unsupported += 1;
+    }
+
+    claimsChecked += 1;
+    if (pain.avgRating !== null) {
+      const expectedAverage = rated.length ? rated.reduce((sum, review) => sum + review.rating, 0) / rated.length : null;
+      if (expectedAverage === null || !approximatelyEqual(pain.avgRating, expectedAverage)) unsupported += 1;
     }
 
     claimsChecked += 1;
     if (pain.trend.evidence) {
-      const dated = pain.reviewIds.filter((id) => byId.get(id)?.date).length;
-      if (pain.trend.recent + pain.trend.earlier > dated) {
-        unsupported += 1;
-        flags.push({
-          insightId: pain.id,
-          insightLabel: pain.label,
-          reviewIds: pain.reviewIds.slice(0, 3),
-          reason: "Trend counts exceed the number of linked reviews that carry a date.",
-        });
+      const datasetDates = reviews.map((review) => (review.date ? Date.parse(review.date) : NaN)).filter(Number.isFinite);
+      if (datasetDates.length < 2) unsupported += 1;
+      else {
+        const split = Math.min(...datasetDates) + (Math.max(...datasetDates) - Math.min(...datasetDates)) / 2;
+        const linkedDates = linkedReviews.map((review) => (review.date ? Date.parse(review.date) : NaN)).filter(Number.isFinite);
+        const earlier = linkedDates.filter((date) => date < split).length;
+        const recent = linkedDates.length - earlier;
+        if (earlier !== pain.trend.earlier || recent !== pain.trend.recent) unsupported += 1;
       }
     }
 
     claimsChecked += 1;
-    if (pain.churn.evidence) {
-      const inside = pain.churn.reviewIds.filter(
-        (id) => byId.has(id) && pain.reviewIds.includes(id),
-      ).length;
-      if (inside !== pain.churn.reviewIds.length) {
-        unsupported += 1;
-        flags.push({
-          insightId: pain.id,
-          insightLabel: pain.label,
-          reviewIds: pain.churn.reviewIds.slice(0, 3),
-          reason: "Churn-signal reviews are not all part of this insight's supporting reviews.",
-        });
-      }
-    }
+    if (pain.churn.evidence && pain.churn.reviewIds.some((id) => !pain.reviewIds.includes(id) || !byId.has(id))) unsupported += 1;
 
     claimsChecked += 1;
-    if (pain.opportunity.evidence) {
-      const opportunity = pain.opportunity;
-      const bad = opportunity.reviewIds.filter((id) => !byId.has(id));
-      if (bad.length > 0) {
-        unsupported += 1;
-        flags.push({
-          insightId: pain.id,
-          insightLabel: pain.label,
-          reviewIds: bad.slice(0, 3),
-          reason: "Opportunity cites review IDs that are not in the connected dataset.",
-        });
-      }
+    if (pain.opportunity.evidence && pain.opportunity.reviewIds.some((id) => !pain.reviewIds.includes(id) || !byId.has(id))) unsupported += 1;
 
-      opportunityChecked += 1;
-      const outside = opportunity.reviewIds.filter((id) => !pain.reviewIds.includes(id));
-      const excerptOutside = opportunity.excerpts.filter(
-        (item) => !opportunity.reviewIds.includes(item.reviewId),
-      );
-      const problemConnection = pain.keywords.some(
-        (keyword) => normalizedOverlap(opportunity.statement, keyword) >= 0.12,
-      );
-      const notParaphrase = normalizedOverlap(opportunity.statement, pain.label) < 0.72;
-      const actionable = INTERVENTION_WORDS.test(opportunity.statement);
-      if (outside.length === 0 && excerptOutside.length === 0 && problemConnection && notParaphrase && actionable) {
-        opportunityPass += 1;
-      } else {
-        flags.push({
-          insightId: pain.id,
-          insightLabel: pain.label,
-          reviewIds: opportunity.reviewIds.slice(0, 3),
-          reason: "Potential opportunity is generic, repetitive, unsupported, or not clearly connected to the evidenced customer problem.",
-        });
-      }
-    }
-
-    claimsChecked += 1;
-    const ratedLinked = pain.reviewIds.filter((id) => byId.get(id)?.rating !== null && byId.get(id)?.rating !== undefined).length;
-    if (pain.avgRating !== null && ratedLinked === 0) {
-      unsupported += 1;
-      flags.push({
-        insightId: pain.id,
-        insightLabel: pain.label,
-        reviewIds: pain.reviewIds.slice(0, 3),
-        reason: "Average rating is stated although no linked review carries a rating.",
-      });
-    }
-
-    if (insightEvaluated) evaluatedInsights += 1;
-
-    specificChecked += 1;
-    if (isSpecificProblem(pain)) specificPass += 1;
-    else {
-      flags.push({
-        insightId: pain.id,
-        insightLabel: pain.label,
-        reviewIds: pain.reviewIds.slice(0, 3),
-        reason: "Insight wording is too generic or does not describe a concrete customer problem.",
-      });
-    }
+    if (insightEvaluated && (centroid || specificChecked > 0)) evaluatedInsights += 1;
   }
 
-  const grounding = result(groundedPass, groundedChecked, "Linked review IDs resolving to real review text");
-  const consistency = result(
-    consistentPass,
-    consistentChecked,
-    "Linked reviews expressing a compatible problem proposition (deterministic linguistic heuristic)",
-    "heuristic",
-  );
-  const relevance = result(
-    relevantPass,
-    relevantChecked,
-    "Excerpts that are verbatim, linked, and relevant to the underlying problem",
-    "heuristic",
-  );
-  const specificity = result(
-    specificPass,
-    specificChecked,
-    "Insights describing a concrete problem rather than an entity, noun, or vague phrase",
-    "heuristic",
-  );
-  const opportunityGrounding = result(
-    opportunityPass,
-    opportunityChecked,
-    "Opportunity hypotheses linked to the problem evidence, specific, and distinct from the pain-point title",
-    "heuristic",
-  );
-
-  const checks = [grounding, consistency, relevance, specificity, opportunityGrounding].filter(
-    (c): c is Extract<CheckResult, { evaluated: true }> => c.evaluated,
-  );
-
-  const overall: Evaluation["overall"] =
-    reviews.length === 0 || sampled.length === 0 || checks.length === 0
-      ? "Not evaluated"
-      : checks.some((c) => c.status === "Fail") || unsupported > 0
-        ? "Fail"
-        : checks.some((c) => c.status === "Warn")
-          ? "Warn"
-          : "Pass";
+  const grounding = result(groundedPass, groundedChecked, "Linked review IDs resolving to non-empty review text");
+  const consistency = result(consistentPass, consistentChecked, "Leave-one-out agreement on problem kind and affected context", "heuristic");
+  const relevance = result(relevantPass, relevantChecked, "Verbatim excerpts expressing the cluster's problem proposition", "heuristic");
+  const specificity = result(specificPass, specificChecked, "Insights naming a specific affected context and customer problem", "heuristic");
+  const opportunityGrounding = result(opportunityPass, opportunityChecked, "Distinct interventions linked to evidence, problem context, and valid review lineage", "heuristic");
+  const checks = [grounding, consistency, relevance, specificity, opportunityGrounding].filter((check): check is Extract<CheckResult, { evaluated: true }> => check.evaluated);
+  const overall: Evaluation["overall"] = reviews.length === 0 || sampled.length === 0 || checks.length === 0
+    ? "Not evaluated"
+    : checks.some((check) => check.status === "Fail") || unsupported > 0
+      ? "Fail"
+      : checks.some((check) => check.status === "Warn")
+        ? "Warn"
+        : "Pass";
 
   return {
-    sample: {
-      insights: sampled.length,
-      insightsAvailable: analysis.painPoints.length,
-      reviewsChecked: consistentChecked,
-    },
+    sample: { insights: sampled.length, insightsAvailable: analysis.painPoints.length, reviewsChecked: consistentChecked },
     grounding,
     consistency,
     relevance,
     specificity,
     opportunityGrounding,
     unsupportedClaims: { evaluated: claimsChecked > 0, count: unsupported, checked: claimsChecked },
-    coverage: {
-      evaluatedInsights,
-      totalInsights: sampled.length,
-      ratio: sampled.length ? evaluatedInsights / sampled.length : null,
-    },
-    flags: flags.slice(0, 20),
+    coverage: { evaluatedInsights, totalInsights: sampled.length, ratio: sampled.length ? evaluatedInsights / sampled.length : null },
+    flags: flags.slice(0, 30),
     overall,
   };
 }

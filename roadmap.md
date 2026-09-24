@@ -1,12 +1,9 @@
 # Roadmap
 
-- [x] AI Evaluation section (deterministic checks, flagged examples, links back to reviews)
-- [x] Dataset-agnostic insight generation (themes mined from the loaded reviews, size-adaptive thresholds)
-- [x] Churn / prioritization / opportunities derived generically from any dataset
-- [x] AI Evaluation runs on the currently selected dataset, no stale results
-- [x] Verified on a 1,000-review file (18 pain points, evaluation Pass) and the large dataset (21 insights)
-- [x] Make the uploaded Uber Reviews file the default dataset with exact field mapping
-- [x] Replace fixed topic matching with dataset-agnostic complaint clustering and verify across unrelated datasets
-- [x] Tighten semantic complaint clustering, evidence quality, trends, confidence, and opportunities
-- [x] Extend AI Evaluation with problem-specificity and opportunity-grounding quality checks
-- [x] Verify current and unrelated datasets, evidence links, build, and runtime behavior
+- [x] Audit analysis and evaluation for circular, phrase-led, and dataset-specific behavior
+- [x] Add a shared dataset-agnostic complaint-proposition representation
+- [x] Replace greedy clustering with best-first problem clustering and duplicate suppression
+- [x] Ground metrics, confidence, trends, churn, priorities, and opportunities in final evidence sets
+- [x] Replace circular evaluation checks with proposition, contamination, specificity, and opportunity checks
+- [ ] Add and run multi-domain quality fixtures
+- [ ] Verify the current dataset, dashboard interactions, AI Evaluation, build, and runtime
