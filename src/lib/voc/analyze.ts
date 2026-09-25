@@ -432,7 +432,8 @@ export function analyze(reviews: Review[]): Analysis {
     const opportunity = buildOpportunity(theme, insight.reviewIds, excerpts);
     const negativity = reviewNegativeShare(matched);
     const support = clamp(theme.reviewIds.length / Math.max(limits.pain * 4, 1));
-    const trendFactor = trend.evidence && trend.direction === "rising" && trend.changePct > 0 ? clamp(trend.changePct / 100) : 0;
+    const trendChange = trend.evidence ? trend.changePct : null;
+    const trendFactor = trend.evidence && trend.direction === "rising" && trendChange !== null && trendChange > 0 ? clamp(trendChange / 100) : 0;
     const evidenceQuality = theme.cohesion * 0.55 + theme.completeness * 0.45;
     const confidenceFactor = confidence.level === "High" ? 1 : confidence.level === "Moderate" ? 0.65 : 0.3;
     const score = Math.round((support * 0.28 + negativity.share * 0.22 + trendFactor * 0.14 + evidenceQuality * 0.24 + theme.severityShare * 0.07 + confidenceFactor * 0.05) * 100);
@@ -460,7 +461,7 @@ export function analyze(reviews: Review[]): Analysis {
   }));
 
   const trends = painPoints
-    .filter((pain) => pain.trend.evidence && pain.trend.direction === "rising" && pain.trend.changePct >= 20 && pain.trend.recent - pain.trend.earlier >= Math.max(4, Math.ceil(limits.trend * 0.2)))
+    .filter((pain) => pain.trend.evidence && pain.trend.direction === "rising" && pain.trend.changePct !== null && pain.trend.changePct >= 20 && pain.trend.recent - pain.trend.earlier >= Math.max(4, Math.ceil(limits.trend * 0.2)))
     .map((pain) => {
       if (!pain.trend.evidence) return null;
       return { id: `trend-${pain.id}`, label: pain.label, reviewIds: pain.reviewIds, negativeShare: pain.negativeShare, avgRating: pain.avgRating, recent: pain.trend.recent, earlier: pain.trend.earlier, changePct: pain.trend.changePct };
