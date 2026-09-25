@@ -53,6 +53,9 @@ const CUES: Record<ProblemKind, Set<string>> = {
 };
 
 const NEGATIONS = new Set(["can't","cannot","cant","couldn't","couldnt","doesn't","doesnt","don't","dont","never","no","not","unable","won't","wont","wouldn't","wouldnt"]);
+const NEGATABLE_ACTIONS = new Set([
+  "accept","book","complete","connect","download","install","load","log","login","open","pay","process","register","save","send","sign","start","submit","sync","update","upload","verify","work",
+]);
 const SEVERE = new Set(["always","constantly","extremely","fraud","horribl","repeatedly","scam","terribl","unsafe","worst"]);
 const CONSEQUENCES = new Set(["abandon","charge","cost","delete","leave","lose","lost","miss","pay","refund","restart","retry","stop","switch","uninstall","wait","waste"]);
 
@@ -110,7 +113,7 @@ export function extractComplaintSignatures(review: Review, corpusCommon: Set<str
     for (let cueIndex = 0; cueIndex < stems.length; cueIndex += 1) {
       let cue = stems[cueIndex] ?? "";
       let kind = cueKind(cue);
-      if (!kind && NEGATIONS.has(raw[cueIndex] ?? "") && stems[cueIndex + 1]) {
+      if (!kind && NEGATIONS.has(raw[cueIndex] ?? "") && stems[cueIndex + 1] && NEGATABLE_ACTIONS.has(stems[cueIndex + 1] ?? "")) {
         cueIndex += 1;
         cue = stems[cueIndex] ?? "";
         kind = "reliability";
