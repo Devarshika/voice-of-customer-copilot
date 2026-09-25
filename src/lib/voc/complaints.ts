@@ -64,7 +64,7 @@ export function normalizeWord(word: string): string {
   else if (value.length > 4 && value.endsWith("ied")) value = `${value.slice(0, -3)}y`;
   else if (value.length > 4 && value.endsWith("ed")) value = value.slice(0, -2);
   else if (value.length > 4 && value.endsWith("es")) value = value.slice(0, -2);
-  else if (value.length > 3 && value.endsWith("s") && !value.endsWith("ss") && !value.endsWith("us")) value = value.slice(0, -1);
+  else if (value.length > 3 && value.endsWith("s") && !value.endsWith("ss") && !value.endsWith("us") && !value.endsWith("is")) value = value.slice(0, -1);
   if (/([^aeiou])\1$/.test(value)) value = value.slice(0, -1);
   return value;
 }

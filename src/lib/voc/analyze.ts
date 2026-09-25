@@ -117,6 +117,16 @@ function surfaceWord(stem: string, sentences: string[]): string {
   return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? stem;
 }
 
+function isLikelyNamedEntity(stem: string, sentences: string[]): boolean {
+  const occurrences = sentences.flatMap((sentence) => {
+    const words = sentence.match(/[\p{L}\p{N}']+/gu) ?? [];
+    return words.map((word, index) => ({ word, index })).filter(({ word }) => normalizedWords(word)[0] === stem);
+  });
+  if (occurrences.length < 3) return false;
+  const capitalizedInsideSentence = occurrences.filter(({ word, index }) => index > 0 && /^\p{Lu}/u.test(word)).length;
+  return capitalizedInsideSentence / occurrences.length >= 0.7;
+}
+
 function buildSeedGroups(signatures: ComplaintSignature[], minEvidence: number): SignatureGroup[] {
   const groups = new Map<string, SignatureGroup>();
   for (const signature of signatures) {
@@ -220,6 +230,7 @@ function discoverThemes(reviews: Review[], minEvidence: number): Theme[] {
       const representativeSentences = [...new Set(representativeSignatures.map((signature) => signature.sentence))].slice(0, 8);
       const mainContextStem = contexts[0];
       if (!mainContextStem) return null;
+      if (isLikelyNamedEntity(mainContextStem, representativeSentences)) return null;
       const context = surfaceWord(mainContextStem, representativeSentences);
       const label = titleCase(`${context} ${problemKindLabel(group.kind)}`);
       const cohesion = clusterCohesion(group);
