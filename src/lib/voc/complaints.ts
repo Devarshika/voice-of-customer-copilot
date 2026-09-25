@@ -36,7 +36,7 @@ export const GENERIC_CONTEXT = new Set([
 ]);
 
 const CONTEXT_NOISE = new Set([
-  "after","around","become","became","before","confirm","continue","during","finally","final","find","found","go","going","keep","keeps","longer","make","made","next","open","reopen","save","saved","see","seen","show","shows","start","started","step","try","tried","when","work","working",
+  "after","around","becom","become","became","before","confirm","continue","dur","during","finally","final","find","found","go","going","keep","keeps","longer","make","made","next","open","reopen","save","saved","see","seen","show","shows","start","started","step","try","tried","when","work","working",
 ]);
 
 const CUES: Record<ProblemKind, Set<string>> = {
