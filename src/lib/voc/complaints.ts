@@ -35,6 +35,10 @@ export const GENERIC_CONTEXT = new Set([
   "anything","app","application","brand","business","company","customer","customers","day","days","everything","experience","hour","hours","minute","minutes","month","months","nothing","one","overall","platform","product","products","service","services","something","system","thing","things","time","times","use","user","users","way","week","weeks","whole",
 ]);
 
+const CONTEXT_NOISE = new Set([
+  "become","became","confirm","continue","finally","final","find","found","go","going","keep","keeps","make","made","next","open","reopen","save","saved","see","seen","show","shows","start","started","try","tried","work","working",
+]);
+
 const CUES: Record<ProblemKind, Set<string>> = {
   blocked: new Set(["block","hard","difficult","reject","stuck","unable"]),
   cancelled: new Set(["cancel"]),
@@ -83,7 +87,7 @@ function cueKind(stem: string): ProblemKind | null {
 }
 
 function informative(word: string, corpusCommon: Set<string>): boolean {
-  return word.length > 2 && !FUNCTION_WORDS.has(word) && !GENERIC_CONTEXT.has(word) && !corpusCommon.has(word) && !cueKind(word) && !NEGATIONS.has(word);
+  return word.length > 2 && !FUNCTION_WORDS.has(word) && !GENERIC_CONTEXT.has(word) && !CONTEXT_NOISE.has(word) && !corpusCommon.has(word) && !cueKind(word) && !NEGATIONS.has(word);
 }
 
 export function corpusCommonTerms(reviews: Review[]): Set<string> {
@@ -116,7 +120,7 @@ export function extractComplaintSignatures(review: Review, corpusCommon: Set<str
       const nearby = stems
         .map((word, index) => ({ word, index, distance: Math.abs(index - cueIndex) }))
         .filter((item) => item.index !== cueIndex && item.distance <= 6 && informative(item.word, corpusCommon))
-        .sort((a, b) => a.distance - b.distance || Number(b.index < cueIndex) - Number(a.index < cueIndex));
+        .sort((a, b) => a.distance - b.distance || Number(a.index > cueIndex) - Number(b.index > cueIndex));
       const context = [...new Set(nearby.slice(0, 2).map((item) => item.word))];
       if (context.length === 0) continue;
       const details = [...new Set(nearby.slice(2, 6).map((item) => item.word))];

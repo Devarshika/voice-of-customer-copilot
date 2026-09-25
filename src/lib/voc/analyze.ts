@@ -125,13 +125,13 @@ function buildSeedGroups(signatures: ComplaintSignature[], minEvidence: number):
     if (existing) {
       existing.signatures.push(signature);
       existing.reviewIds.add(signature.reviewId);
-      for (const context of signature.context) existing.contexts.set(context, (existing.contexts.get(context) ?? 0) + 1);
+      signature.context.forEach((context, index) => existing.contexts.set(context, (existing.contexts.get(context) ?? 0) + (index === 0 ? 2 : 1)));
     } else {
       groups.set(key, {
         kind: signature.kind,
         signatures: [signature],
         reviewIds: new Set([signature.reviewId]),
-        contexts: new Map(signature.context.map((context) => [context, 1])),
+        contexts: new Map(signature.context.map((context, index) => [context, index === 0 ? 2 : 1])),
       });
     }
   }
@@ -244,7 +244,7 @@ function discoverThemes(reviews: Review[], minEvidence: number): Theme[] {
         if (prior.kind !== theme.kind) return false;
         const contextSimilarity = setSimilarity(prior.contexts.slice(0, 3), theme.contexts.slice(0, 3));
         const overlap = evidenceOverlap(new Set(prior.reviewIds), new Set(theme.reviewIds));
-        return contextSimilarity >= 0.5 || overlap >= 0.5;
+        return prior.label.toLowerCase() === theme.label.toLowerCase() || contextSimilarity >= 0.5 || overlap >= 0.5;
       });
     })
     .slice(0, 18);
