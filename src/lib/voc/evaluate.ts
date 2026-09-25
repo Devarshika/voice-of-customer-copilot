@@ -77,12 +77,10 @@ function supportsCentroid(signatures: ComplaintSignature[], centroid: NonNullabl
 }
 
 function opportunitySkeleton(statement: string): string {
-  return statement
-    .toLowerCase()
-    .replace(/[“”"'][^“”"']+[“”"']/g, "_")
-    .replace(/\b[\p{L}\p{N}']+\b/gu, (word) => (INTERVENTION.test(word) ? word : "_"))
-    .replace(/(?:_\s*)+/g, "_")
-    .trim();
+  return contentWords(statement)
+    .filter((word) => INTERVENTION.test(word))
+    .sort()
+    .join("|");
 }
 
 function approximatelyEqual(left: number, right: number, tolerance = 0.0001): boolean {
@@ -181,7 +179,7 @@ export function evaluate(reviews: Review[], analysis: Analysis): Evaluation {
       const lineageValid = opportunity.reviewIds.length > 0 && opportunity.reviewIds.every((id) => pain.reviewIds.includes(id) && byId.has(id));
       const excerptsValid = opportunity.excerpts.length >= 2 && opportunity.excerpts.every((item) => opportunity.reviewIds.includes(item.reviewId));
       const skeleton = opportunitySkeleton(opportunity.statement);
-      const duplicated = (opportunitySkeletonCounts.get(skeleton) ?? 0) > 1;
+      const duplicated = skeleton.length > 0 && (opportunitySkeletonCounts.get(skeleton) ?? 0) >= 3;
       if (contextLinked && actionable && overlapWithLabel < 0.72 && lineageValid && excerptsValid && !duplicated) opportunityPass += 1;
       else flags.push({ insightId: pain.id, insightLabel: pain.label, reviewIds: opportunity.reviewIds.slice(0, 3), reason: duplicated ? "Opportunity repeats the same intervention structure used for another problem." : "Opportunity is generic, repetitive, unsupported, or does not logically address the evidenced problem context." });
     }

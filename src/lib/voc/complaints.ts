@@ -35,6 +35,10 @@ export const GENERIC_CONTEXT = new Set([
   "anything","app","application","brand","business","company","customer","customers","day","days","everything","experience","hour","hours","minute","minutes","month","months","nothing","one","overall","platform","product","products","service","services","something","system","thing","things","time","times","use","user","users","way","week","weeks","whole",
 ]);
 
+const CONTEXT_NOISE = new Set([
+  "after","around","becom","become","became","before","confirm","continue","dur","during","finally","final","find","found","go","going","keep","keeps","longer","make","made","next","open","reopen","save","saved","see","seen","show","shows","start","started","step","try","tried","when","work","working",
+]);
+
 const CUES: Record<ProblemKind, Set<string>> = {
   blocked: new Set(["block","hard","difficult","reject","stuck","unable"]),
   cancelled: new Set(["cancel"]),
@@ -49,6 +53,9 @@ const CUES: Record<ProblemKind, Set<string>> = {
 };
 
 const NEGATIONS = new Set(["can't","cannot","cant","couldn't","couldnt","doesn't","doesnt","don't","dont","never","no","not","unable","won't","wont","wouldn't","wouldnt"]);
+const NEGATABLE_ACTIONS = new Set([
+  "accept","book","complete","connect","download","install","load","log","login","open","pay","process","register","save","send","sign","start","submit","sync","update","upload","verify","work",
+]);
 const SEVERE = new Set(["always","constantly","extremely","fraud","horribl","repeatedly","scam","terribl","unsafe","worst"]);
 const CONSEQUENCES = new Set(["abandon","charge","cost","delete","leave","lose","lost","miss","pay","refund","restart","retry","stop","switch","uninstall","wait","waste"]);
 
@@ -60,7 +67,7 @@ export function normalizeWord(word: string): string {
   else if (value.length > 4 && value.endsWith("ied")) value = `${value.slice(0, -3)}y`;
   else if (value.length > 4 && value.endsWith("ed")) value = value.slice(0, -2);
   else if (value.length > 4 && value.endsWith("es")) value = value.slice(0, -2);
-  else if (value.length > 3 && value.endsWith("s") && !value.endsWith("ss") && !value.endsWith("us")) value = value.slice(0, -1);
+  else if (value.length > 3 && value.endsWith("s") && !value.endsWith("ss") && !value.endsWith("us") && !value.endsWith("is")) value = value.slice(0, -1);
   if (/([^aeiou])\1$/.test(value)) value = value.slice(0, -1);
   return value;
 }
@@ -83,7 +90,7 @@ function cueKind(stem: string): ProblemKind | null {
 }
 
 function informative(word: string, corpusCommon: Set<string>): boolean {
-  return word.length > 2 && !FUNCTION_WORDS.has(word) && !GENERIC_CONTEXT.has(word) && !corpusCommon.has(word) && !cueKind(word) && !NEGATIONS.has(word);
+  return word.length > 2 && !FUNCTION_WORDS.has(word) && !GENERIC_CONTEXT.has(word) && !CONTEXT_NOISE.has(word) && !corpusCommon.has(word) && !cueKind(word) && !NEGATIONS.has(word);
 }
 
 export function corpusCommonTerms(reviews: Review[]): Set<string> {
@@ -106,7 +113,7 @@ export function extractComplaintSignatures(review: Review, corpusCommon: Set<str
     for (let cueIndex = 0; cueIndex < stems.length; cueIndex += 1) {
       let cue = stems[cueIndex] ?? "";
       let kind = cueKind(cue);
-      if (!kind && NEGATIONS.has(raw[cueIndex] ?? "") && stems[cueIndex + 1]) {
+      if (!kind && NEGATIONS.has(raw[cueIndex] ?? "") && stems[cueIndex + 1] && NEGATABLE_ACTIONS.has(stems[cueIndex + 1] ?? "")) {
         cueIndex += 1;
         cue = stems[cueIndex] ?? "";
         kind = "reliability";
@@ -116,7 +123,7 @@ export function extractComplaintSignatures(review: Review, corpusCommon: Set<str
       const nearby = stems
         .map((word, index) => ({ word, index, distance: Math.abs(index - cueIndex) }))
         .filter((item) => item.index !== cueIndex && item.distance <= 6 && informative(item.word, corpusCommon))
-        .sort((a, b) => a.distance - b.distance || Number(b.index < cueIndex) - Number(a.index < cueIndex));
+        .sort((a, b) => a.distance - b.distance || Number(a.index > cueIndex) - Number(b.index > cueIndex));
       const context = [...new Set(nearby.slice(0, 2).map((item) => item.word))];
       if (context.length === 0) continue;
       const details = [...new Set(nearby.slice(2, 6).map((item) => item.word))];

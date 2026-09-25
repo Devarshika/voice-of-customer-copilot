@@ -117,6 +117,16 @@ function surfaceWord(stem: string, sentences: string[]): string {
   return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? stem;
 }
 
+function isLikelyNamedEntity(stem: string, sentences: string[]): boolean {
+  const occurrences = sentences.flatMap((sentence) => {
+    const words = sentence.match(/[\p{L}\p{N}']+/gu) ?? [];
+    return words.map((word, index) => ({ word, index })).filter(({ word }) => normalizedWords(word)[0] === stem);
+  });
+  if (occurrences.length < 3) return false;
+  const capitalized = occurrences.filter(({ word }) => /^\p{Lu}/u.test(word)).length;
+  return capitalized / occurrences.length >= 0.85;
+}
+
 function buildSeedGroups(signatures: ComplaintSignature[], minEvidence: number): SignatureGroup[] {
   const groups = new Map<string, SignatureGroup>();
   for (const signature of signatures) {
@@ -125,13 +135,13 @@ function buildSeedGroups(signatures: ComplaintSignature[], minEvidence: number):
     if (existing) {
       existing.signatures.push(signature);
       existing.reviewIds.add(signature.reviewId);
-      for (const context of signature.context) existing.contexts.set(context, (existing.contexts.get(context) ?? 0) + 1);
+      signature.context.forEach((context, index) => existing.contexts.set(context, (existing.contexts.get(context) ?? 0) + (index === 0 ? 2 : 1)));
     } else {
       groups.set(key, {
         kind: signature.kind,
         signatures: [signature],
         reviewIds: new Set([signature.reviewId]),
-        contexts: new Map(signature.context.map((context) => [context, 1])),
+        contexts: new Map(signature.context.map((context, index) => [context, index === 0 ? 2 : 1])),
       });
     }
   }
@@ -150,6 +160,10 @@ function groupSimilarity(left: SignatureGroup, right: SignatureGroup): number {
   if (left.kind !== right.kind) return 0;
   const context = setSimilarity(left.contexts.keys(), right.contexts.keys());
   const overlap = evidenceOverlap(left.reviewIds, right.reviewIds);
+  if (overlap >= 0.5) return 0.9;
+  const leftPrimary = [...left.contexts].sort((a, b) => b[1] - a[1])[0]?.[0];
+  const rightPrimary = [...right.contexts].sort((a, b) => b[1] - a[1])[0]?.[0];
+  if (leftPrimary && leftPrimary === rightPrimary) return 0.78;
   const leftTop = left.signatures.slice(0, 20);
   const rightTop = right.signatures.slice(0, 20);
   let bestSignature = 0;
@@ -216,6 +230,7 @@ function discoverThemes(reviews: Review[], minEvidence: number): Theme[] {
       const representativeSentences = [...new Set(representativeSignatures.map((signature) => signature.sentence))].slice(0, 8);
       const mainContextStem = contexts[0];
       if (!mainContextStem) return null;
+      if (isLikelyNamedEntity(mainContextStem, representativeSentences)) return null;
       const context = surfaceWord(mainContextStem, representativeSentences);
       const label = titleCase(`${context} ${problemKindLabel(group.kind)}`);
       const cohesion = clusterCohesion(group);
@@ -244,7 +259,7 @@ function discoverThemes(reviews: Review[], minEvidence: number): Theme[] {
         if (prior.kind !== theme.kind) return false;
         const contextSimilarity = setSimilarity(prior.contexts.slice(0, 3), theme.contexts.slice(0, 3));
         const overlap = evidenceOverlap(new Set(prior.reviewIds), new Set(theme.reviewIds));
-        return contextSimilarity >= 0.5 || overlap >= 0.5;
+        return prior.label.toLowerCase() === theme.label.toLowerCase() || contextSimilarity >= 0.5 || overlap >= 0.5;
       });
     })
     .slice(0, 18);
@@ -432,15 +447,17 @@ export function analyze(reviews: Review[]): Analysis {
     const opportunity = buildOpportunity(theme, insight.reviewIds, excerpts);
     const negativity = reviewNegativeShare(matched);
     const support = clamp(theme.reviewIds.length / Math.max(limits.pain * 4, 1));
-    const trendFactor = trend.evidence && trend.direction === "rising" && trend.changePct > 0 ? clamp(trend.changePct / 100) : 0;
+    const trendChange = trend.evidence ? trend.changePct : null;
+    const trendFactor = trend.evidence && trend.direction === "rising" && trendChange !== null && trendChange > 0 ? clamp(trendChange / 100) : 0;
     const evidenceQuality = theme.cohesion * 0.55 + theme.completeness * 0.45;
     const confidenceFactor = confidence.level === "High" ? 1 : confidence.level === "Moderate" ? 0.65 : 0.3;
     const score = Math.round((support * 0.28 + negativity.share * 0.22 + trendFactor * 0.14 + evidenceQuality * 0.24 + theme.severityShare * 0.07 + confidenceFactor * 0.05) * 100);
     return { theme, insight, matched, excerpts, trend, confidence, opportunity, negativity, support, trendFactor, evidenceQuality, score };
   }).filter((item): item is NonNullable<typeof item> => item !== null);
 
-  prepared.sort((a, b) => b.score - a.score || b.insight.reviewIds.length - a.insight.reviewIds.length);
-  const painPoints: PainPoint[] = prepared.map((item, index) => ({
+  const accepted = prepared.filter((item) => item.confidence.level !== "Low");
+  accepted.sort((a, b) => b.score - a.score || b.insight.reviewIds.length - a.insight.reviewIds.length);
+  const painPoints: PainPoint[] = accepted.map((item, index) => ({
     ...item.insight,
     description: item.theme.problem,
     keywords: item.theme.representativeSentences,
@@ -460,7 +477,7 @@ export function analyze(reviews: Review[]): Analysis {
   }));
 
   const trends = painPoints
-    .filter((pain) => pain.trend.evidence && pain.trend.direction === "rising" && pain.trend.changePct >= 20 && pain.trend.recent - pain.trend.earlier >= Math.max(4, Math.ceil(limits.trend * 0.2)))
+    .filter((pain) => pain.trend.evidence && pain.trend.direction === "rising" && pain.trend.changePct !== null && pain.trend.changePct >= 20 && pain.trend.recent - pain.trend.earlier >= Math.max(4, Math.ceil(limits.trend * 0.2)))
     .map((pain) => {
       if (!pain.trend.evidence) return null;
       return { id: `trend-${pain.id}`, label: pain.label, reviewIds: pain.reviewIds, negativeShare: pain.negativeShare, avgRating: pain.avgRating, recent: pain.trend.recent, earlier: pain.trend.earlier, changePct: pain.trend.changePct };
