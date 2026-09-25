@@ -123,8 +123,8 @@ function isLikelyNamedEntity(stem: string, sentences: string[]): boolean {
     return words.map((word, index) => ({ word, index })).filter(({ word }) => normalizedWords(word)[0] === stem);
   });
   if (occurrences.length < 3) return false;
-  const capitalizedInsideSentence = occurrences.filter(({ word, index }) => index > 0 && /^\p{Lu}/u.test(word)).length;
-  return capitalizedInsideSentence / occurrences.length >= 0.7;
+  const capitalized = occurrences.filter(({ word }) => /^\p{Lu}/u.test(word)).length;
+  return capitalized / occurrences.length >= 0.85;
 }
 
 function buildSeedGroups(signatures: ComplaintSignature[], minEvidence: number): SignatureGroup[] {
@@ -455,8 +455,9 @@ export function analyze(reviews: Review[]): Analysis {
     return { theme, insight, matched, excerpts, trend, confidence, opportunity, negativity, support, trendFactor, evidenceQuality, score };
   }).filter((item): item is NonNullable<typeof item> => item !== null);
 
-  prepared.sort((a, b) => b.score - a.score || b.insight.reviewIds.length - a.insight.reviewIds.length);
-  const painPoints: PainPoint[] = prepared.map((item, index) => ({
+  const accepted = prepared.filter((item) => item.confidence.level !== "Low");
+  accepted.sort((a, b) => b.score - a.score || b.insight.reviewIds.length - a.insight.reviewIds.length);
+  const painPoints: PainPoint[] = accepted.map((item, index) => ({
     ...item.insight,
     description: item.theme.problem,
     keywords: item.theme.representativeSentences,
