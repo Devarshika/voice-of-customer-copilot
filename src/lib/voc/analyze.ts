@@ -150,6 +150,10 @@ function groupSimilarity(left: SignatureGroup, right: SignatureGroup): number {
   if (left.kind !== right.kind) return 0;
   const context = setSimilarity(left.contexts.keys(), right.contexts.keys());
   const overlap = evidenceOverlap(left.reviewIds, right.reviewIds);
+  if (overlap >= 0.5) return 0.9;
+  const leftPrimary = [...left.contexts].sort((a, b) => b[1] - a[1])[0]?.[0];
+  const rightPrimary = [...right.contexts].sort((a, b) => b[1] - a[1])[0]?.[0];
+  if (leftPrimary && leftPrimary === rightPrimary) return 0.78;
   const leftTop = left.signatures.slice(0, 20);
   const rightTop = right.signatures.slice(0, 20);
   let bestSignature = 0;
