@@ -255,7 +255,15 @@ function discoverThemes(reviews: Review[], minEvidence: number): Theme[] {
       const representativeSignatures = [...group.signatures].sort(
         (a, b) => b.completeness - a.completeness || Number(b.severity) - Number(a.severity) || a.sentence.localeCompare(b.sentence),
       );
-      const representativeSentences = [...new Set(representativeSignatures.map((signature) => signature.sentence))].slice(0, 8);
+      const mechanismCounts = new Map<string, number>();
+      for (const signature of group.signatures) {
+        const mechanism = `${signature.kind}|${signature.relatedKinds.slice().sort().join("+")}`;
+        mechanismCounts.set(mechanism, (mechanismCounts.get(mechanism) ?? 0) + 1);
+      }
+      const dominantMechanism = [...mechanismCounts].sort((a, b) => b[1] - a[1])[0]?.[0];
+      const representativeSentences = [...new Set(representativeSignatures
+        .filter((signature) => `${signature.kind}|${signature.relatedKinds.slice().sort().join("+")}` === dominantMechanism)
+        .map((signature) => signature.sentence))].slice(0, 8);
       const mainContextStem = contexts[0];
       if (!mainContextStem) return null;
       if (isLikelyNamedEntity(mainContextStem, representativeSentences)) return null;
@@ -476,7 +484,14 @@ export function analyze(reviews: Review[]): Analysis {
     if (!insight) return null;
     const ratedCount = matched.filter((review) => review.rating !== null).length;
     const signatureByReview = new Map<string, ComplaintSignature>();
+    const mechanismCounts = new Map<string, number>();
     for (const signature of theme.signatures) {
+      const mechanism = `${signature.kind}|${signature.relatedKinds.slice().sort().join("+")}`;
+      mechanismCounts.set(mechanism, (mechanismCounts.get(mechanism) ?? 0) + 1);
+    }
+    const dominantMechanism = [...mechanismCounts].sort((a, b) => b[1] - a[1])[0]?.[0];
+    for (const signature of theme.signatures) {
+      if (`${signature.kind}|${signature.relatedKinds.slice().sort().join("+")}` !== dominantMechanism) continue;
       const existing = signatureByReview.get(signature.reviewId);
       if (!existing || signature.completeness > existing.completeness) signatureByReview.set(signature.reviewId, signature);
     }

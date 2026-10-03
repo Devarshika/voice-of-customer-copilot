@@ -86,7 +86,11 @@ function dominantSignature(signatures: ComplaintSignature[]): { kind: ComplaintS
 function supportsCentroid(signatures: ComplaintSignature[], centroid: NonNullable<ReturnType<typeof dominantSignature>>): boolean {
   return signatures.some((signature) => {
     const mechanism = `${signature.kind}|${signature.relatedKinds.slice().sort().join("+")}`;
-    return signature.kind === centroid.kind && centroid.mechanisms.includes(mechanism);
+    if (signature.kind !== centroid.kind) return false;
+    return centroid.mechanisms.some((candidate) => {
+      const related = candidate.split("|")[1]?.split("+").filter(Boolean) ?? [];
+      return mechanism === candidate || (signature.relatedKinds.length > 0 && related.some((kind) => signature.relatedKinds.includes(kind as ComplaintSignature["kind"])));
+    });
   });
 }
 
@@ -274,7 +278,7 @@ export function evaluate(reviews: Review[], analysis: Analysis): Evaluation {
       const sameMechanism = setSimilarity(leftCentroid.mechanisms, rightCentroid.mechanisms) > 0;
       const contextSimilarity = setSimilarity(leftCentroid.contexts, rightCentroid.contexts);
       const overlap = evidenceOverlap(left.reviewIds, right.reviewIds);
-      if (!sameMechanism || (contextSimilarity < 0.5 && overlap < 0.42)) continue;
+      if (!sameMechanism || contextSimilarity < 0.5 || overlap < 0.42) continue;
       consistentChecked += 1;
       flags.push({
         insightId: right.id,
