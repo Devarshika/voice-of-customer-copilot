@@ -1,6 +1,7 @@
 import {
   corpusCommonTerms,
   extractComplaintSignatures,
+  isConcreteComplaint,
   normalizedWords,
   problemKindLabel,
   setSimilarity,
@@ -47,6 +48,8 @@ type Theme = {
   cohesion: number;
   completeness: number;
   severityShare: number;
+  mechanismPurity: number;
+  concreteShare: number;
 };
 
 const CHURN_RULES: { label: string; patterns: RegExp[] }[] = [
@@ -160,16 +163,20 @@ function groupSimilarity(left: SignatureGroup, right: SignatureGroup): number {
   if (left.kind !== right.kind) return 0;
   const context = setSimilarity(left.contexts.keys(), right.contexts.keys());
   const overlap = evidenceOverlap(left.reviewIds, right.reviewIds);
+  const leftCues = new Set(left.signatures.map((signature) => signature.cue));
+  const rightCues = new Set(right.signatures.map((signature) => signature.cue));
+  const mechanism = setSimilarity(leftCues, rightCues);
+  if (mechanism === 0) return 0;
   if (overlap >= 0.5) return 0.9;
   const leftPrimary = [...left.contexts].sort((a, b) => b[1] - a[1])[0]?.[0];
   const rightPrimary = [...right.contexts].sort((a, b) => b[1] - a[1])[0]?.[0];
-  if (leftPrimary && leftPrimary === rightPrimary) return 0.78;
+  if (leftPrimary && leftPrimary === rightPrimary) return 0.72 + mechanism * 0.08;
   const leftTop = left.signatures.slice(0, 20);
   const rightTop = right.signatures.slice(0, 20);
   let bestSignature = 0;
   for (const a of leftTop) for (const b of rightTop) bestSignature = Math.max(bestSignature, signatureCompatibility(a, b));
   if (context === 0 && overlap < 0.22) return 0;
-  return context * 0.5 + overlap * 0.3 + bestSignature * 0.2;
+  return mechanism * 0.28 + context * 0.34 + overlap * 0.25 + bestSignature * 0.13;
 }
 
 function mergeGroups(left: SignatureGroup, right: SignatureGroup): SignatureGroup {
@@ -193,7 +200,10 @@ function mergeBestFirst(seedGroups: SignatureGroup[]): SignatureGroup[] {
         const b = groups[right];
         if (!a || !b) continue;
         const score = groupSimilarity(a, b);
-        if (score >= 0.44 && (!best || score > best.score)) best = { left, right, score };
+        if (score >= 0.5 && (!best || score > best.score)) {
+          const candidate = mergeGroups(a, b);
+          if (mechanismPurity(candidate) >= 0.68 && clusterCohesion(candidate) >= 0.58) best = { left, right, score };
+        }
       }
     }
     if (!best) return groups;
@@ -203,6 +213,22 @@ function mergeBestFirst(seedGroups: SignatureGroup[]): SignatureGroup[] {
     groups.splice(best.right, 1);
     groups.splice(best.left, 1, mergeGroups(left, right));
   }
+}
+
+function mechanismPurity(group: SignatureGroup): number {
+  const cues = new Map<string, Set<string>>();
+  for (const signature of group.signatures) {
+    const ids = cues.get(signature.cue) ?? new Set<string>();
+    ids.add(signature.reviewId);
+    cues.set(signature.cue, ids);
+  }
+  const dominant = Math.max(0, ...[...cues.values()].map((ids) => ids.size));
+  return group.reviewIds.size ? dominant / group.reviewIds.size : 0;
+}
+
+function concretePropositionShare(group: SignatureGroup): number {
+  const concrete = new Set(group.signatures.filter(isConcreteComplaint).map((signature) => signature.reviewId));
+  return group.reviewIds.size ? concrete.size / group.reviewIds.size : 0;
 }
 
 function clusterCohesion(group: SignatureGroup): number {
@@ -234,6 +260,8 @@ function discoverThemes(reviews: Review[], minEvidence: number): Theme[] {
       const context = surfaceWord(mainContextStem, representativeSentences);
       const label = titleCase(`${context} ${problemKindLabel(group.kind)}`);
       const cohesion = clusterCohesion(group);
+      const mechanism = mechanismPurity(group);
+      const concrete = concretePropositionShare(group);
       const completeness = group.signatures.reduce((sum, signature) => sum + signature.completeness, 0) / group.signatures.length;
       const severeReviews = new Set(group.signatures.filter((signature) => signature.severity).map((signature) => signature.reviewId));
       const supportingExamples = representativeSentences.slice(0, 2).map((sentence) => `“${sentence}”`).join(" and ");
@@ -249,17 +277,21 @@ function discoverThemes(reviews: Review[], minEvidence: number): Theme[] {
         cohesion,
         completeness,
         severityShare: reviewIds.length ? severeReviews.size / reviewIds.length : 0,
+        mechanismPurity: mechanism,
+        concreteShare: concrete,
       } satisfies Theme;
     })
     .filter((theme): theme is Theme => theme !== null)
-    .filter((theme) => theme.cohesion >= 0.68 && theme.completeness >= 0.68)
+    .filter((theme) => theme.cohesion >= 0.68 && theme.completeness >= 0.68 && theme.mechanismPurity >= 0.68)
+    .filter((theme) => theme.kind !== "quality" || theme.concreteShare >= 0.55)
     .sort((a, b) => b.reviewIds.length - a.reviewIds.length || b.cohesion - a.cohesion)
     .filter((theme, index, all) => {
       return !all.slice(0, index).some((prior) => {
         if (prior.kind !== theme.kind) return false;
         const contextSimilarity = setSimilarity(prior.contexts.slice(0, 3), theme.contexts.slice(0, 3));
         const overlap = evidenceOverlap(new Set(prior.reviewIds), new Set(theme.reviewIds));
-        return prior.label.toLowerCase() === theme.label.toLowerCase() || contextSimilarity >= 0.5 || overlap >= 0.5;
+        const sharedMechanism = prior.signatures.some((left) => theme.signatures.some((right) => left.cue === right.cue));
+        return sharedMechanism && (prior.label.toLowerCase() === theme.label.toLowerCase() || contextSimilarity >= 0.5 || overlap >= 0.42);
       });
     })
     .slice(0, 18);
@@ -384,26 +416,39 @@ function buildConfidence(theme: Theme, total: number, minEvidence: number, rated
 
 function opportunityStatement(theme: Theme): string | null {
   const contextStem = theme.contexts[0];
-  if (!contextStem || theme.cohesion < 0.72 || theme.completeness < 0.7) return null;
+  if (!contextStem || theme.cohesion < 0.72 || theme.completeness < 0.7 || theme.mechanismPurity < 0.72) return null;
   const context = surfaceWord(contextStem, theme.representativeSentences).toLowerCase();
-  const consequences = [...new Set(theme.signatures.flatMap((signature) => signature.consequence))];
-  const consequence = consequences[0];
-  const outcome = consequence
-    ? ` so customers are less likely to ${surfaceWord(consequence, theme.representativeSentences).toLowerCase()}`
-    : "";
-  const statements: Record<ProblemKind, string | null> = {
-    blocked: `Explore removing the blocking step around ${context} and offering an alternate completion path${outcome}.`,
-    cancelled: `Explore reducing avoidable ${context} cancellations through earlier confirmation and a clear recovery path${outcome}.`,
-    confusing: `Explore clarifying ${context} decisions with contextual guidance and explicit status cues${outcome}.`,
-    incorrect: `Explore validating ${context} before completion and giving customers a direct correction path${outcome}.`,
-    missing: `Explore making ${context} status traceable and enabling direct resolution when it is missing${outcome}.`,
-    quality: consequence ? `Explore targeted quality controls around ${context} that address the observed ${consequence} consequence.` : null,
-    reliability: `Explore preventing ${context} failures and preserving progress through a recoverable retry path${outcome}.`,
-    slow: `Explore reducing wait time for ${context} and showing progress when processing takes longer than expected${outcome}.`,
-    unavailable: `Explore earlier availability checks and a useful fallback when ${context} cannot be provided${outcome}.`,
-    unsafe: `Explore stronger verification and incident-reporting controls around ${context}${outcome}.`,
-  };
-  return statements[theme.kind];
+  const consequenceCounts = new Map<string, number>();
+  for (const signature of theme.signatures) for (const consequence of signature.consequence) consequenceCounts.set(consequence, (consequenceCounts.get(consequence) ?? 0) + 1);
+  const consequence = [...consequenceCounts].sort((a, b) => b[1] - a[1])[0];
+  if (!consequence || consequence[1] < Math.max(2, Math.ceil(theme.reviewIds.length * 0.08))) return null;
+  const consequenceWord = surfaceWord(consequence[0], theme.representativeSentences).toLowerCase();
+  const cueCounts = new Map<string, number>();
+  for (const signature of theme.signatures) cueCounts.set(signature.cue, (cueCounts.get(signature.cue) ?? 0) + 1);
+  const cueStem = [...cueCounts].sort((a, b) => b[1] - a[1])[0]?.[0];
+  if (!cueStem) return null;
+  const cue = surfaceWord(cueStem, theme.representativeSentences).toLowerCase();
+
+  const recovery = new Map<string, string>([
+    ["wait", `surface the ${context} state earlier and give customers a time-bound fallback before the wait grows`],
+    ["retry", `preserve progress when ${context} ${cue} and offer a controlled retry from the failed step`],
+    ["restart", `checkpoint progress around ${context} so a ${cue} state can recover without a full restart`],
+    ["charge", `validate the ${context} outcome before charging and expose a direct correction path when it ${cue}`],
+    ["cost", `show the ${context} cost before commitment and provide a correction path when the outcome ${cue}`],
+    ["pay", `verify the ${context} state before payment and make an incorrect outcome directly reversible`],
+    ["refund", `make the ${context} resolution status traceable and escalate it when the expected refund does not arrive`],
+    ["miss", `detect the ${context} failure before completion and route customers to an alternate completion path`],
+    ["lose", `preserve customer progress and records when ${context} ${cue}, with a recoverable restore point`],
+    ["lost", `preserve customer progress and records when ${context} ${cue}, with a recoverable restore point`],
+    ["waste", `detect the ${context} failure earlier and offer an exit or fallback before more customer effort is spent`],
+    ["stop", `add an earlier recovery checkpoint for ${context} before the repeated ${cue} outcome drives customers to stop`],
+    ["switch", `add an earlier recovery checkpoint for ${context} before the repeated ${cue} outcome drives customers to switch`],
+    ["leave", `add an earlier recovery checkpoint for ${context} before the repeated ${cue} outcome drives customers to leave`],
+    ["uninstall", `add an earlier recovery checkpoint for ${context} before the repeated ${cue} outcome drives customers to uninstall`],
+    ["abandon", `offer a recoverable alternate path when ${context} ${cue}, before customers abandon the task`],
+    ["delete", `introduce a review-and-recovery step around ${context} before the ${cue} outcome leads to deletion`],
+  ]).get(consequence[0]);
+  return recovery ? `Test whether teams can ${recovery}; the linked reviews repeatedly connect this failure with customers having to ${consequenceWord}.` : null;
 }
 
 function buildOpportunity(theme: Theme, reviewIds: string[], excerpts: Excerpt[]): OpportunityEvidence {
