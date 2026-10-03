@@ -3,6 +3,7 @@ import {
   corpusCommonTerms,
   describesProblem,
   extractComplaintSignatures,
+  isConcreteComplaint,
   setSimilarity,
   signatureCompatibility,
   type ComplaintSignature,
@@ -50,12 +51,17 @@ function cleanExcerpt(text: string): string {
   return text.replace(/^…|…$/g, "").trim().toLowerCase();
 }
 
-function dominantSignature(signatures: ComplaintSignature[]): { kind: ComplaintSignature["kind"]; contexts: string[] } | null {
+function dominantSignature(signatures: ComplaintSignature[]): { kind: ComplaintSignature["kind"]; contexts: string[]; mechanisms: string[] } | null {
   if (signatures.length < 2) return null;
   const kinds = new Map<ComplaintSignature["kind"], number>();
   const contexts = new Map<string, Set<string>>();
+  const mechanisms = new Map<string, Set<string>>();
   for (const signature of signatures) {
     kinds.set(signature.kind, (kinds.get(signature.kind) ?? 0) + 1);
+    const mechanism = `${signature.kind}|${signature.relatedKinds.slice().sort().join("+")}`;
+    const mechanismIds = mechanisms.get(mechanism) ?? new Set<string>();
+    mechanismIds.add(signature.reviewId);
+    mechanisms.set(mechanism, mechanismIds);
     for (const context of signature.context) {
       const ids = contexts.get(context) ?? new Set<string>();
       ids.add(signature.reviewId);
@@ -69,11 +75,23 @@ function dominantSignature(signatures: ComplaintSignature[]): { kind: ComplaintS
     .sort((a, b) => b[1].size - a[1].size)
     .slice(0, 4)
     .map(([context]) => context);
-  return dominantContexts.length > 0 ? { kind, contexts: dominantContexts } : null;
+  const dominantMechanisms = [...mechanisms]
+    .filter(([, ids]) => ids.size >= Math.max(2, Math.ceil(signatures.length * 0.18)))
+    .sort((a, b) => b[1].size - a[1].size)
+    .slice(0, 3)
+    .map(([mechanism]) => mechanism);
+  return dominantContexts.length > 0 && dominantMechanisms.length > 0 ? { kind, contexts: dominantContexts, mechanisms: dominantMechanisms } : null;
 }
 
 function supportsCentroid(signatures: ComplaintSignature[], centroid: NonNullable<ReturnType<typeof dominantSignature>>): boolean {
-  return signatures.some((signature) => signature.kind === centroid.kind && setSimilarity(signature.context, centroid.contexts) > 0);
+  return signatures.some((signature) => {
+    const mechanism = `${signature.kind}|${signature.relatedKinds.slice().sort().join("+")}`;
+    if (signature.kind !== centroid.kind) return false;
+    return centroid.mechanisms.some((candidate) => {
+      const related = candidate.split("|")[1]?.split("+").filter(Boolean) ?? [];
+      return mechanism === candidate || (signature.relatedKinds.length > 0 && related.some((kind) => signature.relatedKinds.includes(kind as ComplaintSignature["kind"])));
+    });
+  });
 }
 
 function opportunitySkeleton(statement: string): string {
@@ -81,6 +99,15 @@ function opportunitySkeleton(statement: string): string {
     .filter((word) => INTERVENTION.test(word))
     .sort()
     .join("|");
+}
+
+function evidenceOverlap(left: string[], right: string[]): number {
+  const a = new Set(left);
+  const b = new Set(right);
+  const smaller = a.size <= b.size ? a : b;
+  let shared = 0;
+  for (const id of smaller) if ((smaller === a ? b : a).has(id)) shared += 1;
+  return smaller.size ? shared / smaller.size : 0;
 }
 
 function approximatelyEqual(left: number, right: number, tolerance = 0.0001): boolean {
@@ -114,6 +141,7 @@ export function evaluate(reviews: Review[], analysis: Analysis): Evaluation {
   let claimsChecked = 0;
   let evaluatedInsights = 0;
   const flags: Flag[] = [];
+  const centroids = new Map<string, NonNullable<ReturnType<typeof dominantSignature>>>();
 
   for (const pain of sampled) {
     let insightEvaluated = false;
@@ -129,6 +157,7 @@ export function evaluate(reviews: Review[], analysis: Analysis): Evaluation {
 
     const linkedSignatures = pain.reviewIds.flatMap((id) => signaturesByReview.get(id) ?? []);
     const centroid = dominantSignature(linkedSignatures);
+    if (centroid) centroids.set(pain.id, centroid);
     const sampledIds = pain.reviewIds.slice(0, REVIEWS_PER_INSIGHT);
     const offTheme: string[] = [];
     if (centroid && sampledIds.length >= 3) {
@@ -166,7 +195,10 @@ export function evaluate(reviews: Review[], analysis: Analysis): Evaluation {
     specificChecked += 1;
     const labelSpecific = describesProblem(pain.label);
     const contextSpecific = centroid ? centroid.contexts.some((context) => contentWords(context).length > 0) : false;
-    if (labelSpecific && contextSpecific) specificPass += 1;
+    const concreteReviews = new Set(linkedSignatures.filter(isConcreteComplaint).map((signature) => signature.reviewId));
+    const concreteShare = pain.reviewIds.length ? concreteReviews.size / pain.reviewIds.length : 0;
+    const propositionSpecific = centroid ? centroid.kind !== "quality" || concreteShare >= 0.55 : false;
+    if (labelSpecific && contextSpecific && propositionSpecific) specificPass += 1;
     else flags.push({ insightId: pain.id, insightLabel: pain.label, reviewIds: pain.reviewIds.slice(0, 3), reason: "Insight is generic, incomplete, or does not name both an affected context and a customer problem." });
 
     if (pain.opportunity.evidence && centroid) {
@@ -179,7 +211,7 @@ export function evaluate(reviews: Review[], analysis: Analysis): Evaluation {
       const lineageValid = opportunity.reviewIds.length > 0 && opportunity.reviewIds.every((id) => pain.reviewIds.includes(id) && byId.has(id));
       const excerptsValid = opportunity.excerpts.length >= 2 && opportunity.excerpts.every((item) => opportunity.reviewIds.includes(item.reviewId));
       const skeleton = opportunitySkeleton(opportunity.statement);
-      const duplicated = skeleton.length > 0 && (opportunitySkeletonCounts.get(skeleton) ?? 0) >= 3;
+      const duplicated = skeleton.length > 0 && (opportunitySkeletonCounts.get(skeleton) ?? 0) >= 2;
       if (contextLinked && actionable && overlapWithLabel < 0.72 && lineageValid && excerptsValid && !duplicated) opportunityPass += 1;
       else flags.push({ insightId: pain.id, insightLabel: pain.label, reviewIds: opportunity.reviewIds.slice(0, 3), reason: duplicated ? "Opportunity repeats the same intervention structure used for another problem." : "Opportunity is generic, repetitive, unsupported, or does not logically address the evidenced problem context." });
     }
@@ -233,11 +265,35 @@ export function evaluate(reviews: Review[], analysis: Analysis): Evaluation {
     if (insightEvaluated && (centroid || specificChecked > 0)) evaluatedInsights += 1;
   }
 
+  for (let leftIndex = 0; leftIndex < sampled.length; leftIndex += 1) {
+    const left = sampled[leftIndex];
+    if (!left) continue;
+    const leftCentroid = centroids.get(left.id);
+    if (!leftCentroid) continue;
+    for (let rightIndex = leftIndex + 1; rightIndex < sampled.length; rightIndex += 1) {
+      const right = sampled[rightIndex];
+      if (!right) continue;
+      const rightCentroid = centroids.get(right.id);
+      if (!rightCentroid || leftCentroid.kind !== rightCentroid.kind) continue;
+      const sameMechanism = setSimilarity(leftCentroid.mechanisms, rightCentroid.mechanisms) > 0;
+      const contextSimilarity = setSimilarity(leftCentroid.contexts, rightCentroid.contexts);
+      const overlap = evidenceOverlap(left.reviewIds, right.reviewIds);
+      if (!sameMechanism || contextSimilarity < 0.5 || overlap < 0.42) continue;
+      consistentChecked += 1;
+      flags.push({
+        insightId: right.id,
+        insightLabel: right.label,
+        reviewIds: right.reviewIds.filter((id) => left.reviewIds.includes(id)).slice(0, 3),
+        reason: `Potential semantic duplicate of “${left.label}”: both insights retain the same failure mechanism and substantially overlapping context or evidence.`,
+      });
+    }
+  }
+
   const grounding = result(groundedPass, groundedChecked, "Linked review IDs resolving to non-empty review text");
-  const consistency = result(consistentPass, consistentChecked, "Leave-one-out agreement on problem kind and affected context", "heuristic");
+  const consistency = result(consistentPass, consistentChecked, "Leave-one-out agreement plus final semantic duplicate rejection across problem mechanisms", "heuristic");
   const relevance = result(relevantPass, relevantChecked, "Verbatim excerpts expressing the cluster's problem proposition", "heuristic");
-  const specificity = result(specificPass, specificChecked, "Insights naming a specific affected context and customer problem", "heuristic");
-  const opportunityGrounding = result(opportunityPass, opportunityChecked, "Distinct interventions linked to evidence, problem context, and valid review lineage", "heuristic");
+  const specificity = result(specificPass, specificChecked, "Insights naming a concrete failure proposition and affected customer context, with vague quality-only evidence rejected", "heuristic");
+  const opportunityGrounding = result(opportunityPass, opportunityChecked, "Evidence-linked interventions with valid lineage and no repeated intervention structure", "heuristic");
   const checks = [grounding, consistency, relevance, specificity, opportunityGrounding].filter((check): check is Extract<CheckResult, { evaluated: true }> => check.evaluated);
   const overall: Evaluation["overall"] = reviews.length === 0 || sampled.length === 0 || checks.length === 0
     ? "Not evaluated"
