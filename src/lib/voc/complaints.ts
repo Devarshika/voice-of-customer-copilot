@@ -112,7 +112,7 @@ export function extractComplaintSignatures(review: Review, corpusCommon: Set<str
   for (const sentence of sentences) {
     const raw = sentence.toLowerCase().match(WORDS) ?? [];
     const stems = raw.map(normalizeWord);
-    const sentenceKinds = [...new Set(stems.map(cueKind).filter((kind): kind is ProblemKind => kind !== null))];
+    const sentenceKinds = [...new Set(stems.map(cueKind).filter((kind): kind is ProblemKind => kind !== null && kind !== "quality"))];
     for (let cueIndex = 0; cueIndex < stems.length; cueIndex += 1) {
       let cue = stems[cueIndex] ?? "";
       let kind = cueKind(cue);

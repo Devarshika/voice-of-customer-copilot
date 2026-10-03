@@ -84,7 +84,10 @@ function dominantSignature(signatures: ComplaintSignature[]): { kind: ComplaintS
 }
 
 function supportsCentroid(signatures: ComplaintSignature[], centroid: NonNullable<ReturnType<typeof dominantSignature>>): boolean {
-  return signatures.some((signature) => signature.kind === centroid.kind && setSimilarity(signature.context, centroid.contexts) > 0);
+  return signatures.some((signature) => {
+    const mechanism = `${signature.kind}|${signature.relatedKinds.slice().sort().join("+")}`;
+    return signature.kind === centroid.kind && centroid.mechanisms.includes(mechanism);
+  });
 }
 
 function opportunitySkeleton(statement: string): string {
