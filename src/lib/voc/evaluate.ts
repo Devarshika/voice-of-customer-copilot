@@ -51,16 +51,17 @@ function cleanExcerpt(text: string): string {
   return text.replace(/^…|…$/g, "").trim().toLowerCase();
 }
 
-function dominantSignature(signatures: ComplaintSignature[]): { kind: ComplaintSignature["kind"]; contexts: string[]; cues: string[] } | null {
+function dominantSignature(signatures: ComplaintSignature[]): { kind: ComplaintSignature["kind"]; contexts: string[]; mechanisms: string[] } | null {
   if (signatures.length < 2) return null;
   const kinds = new Map<ComplaintSignature["kind"], number>();
   const contexts = new Map<string, Set<string>>();
-  const cues = new Map<string, Set<string>>();
+  const mechanisms = new Map<string, Set<string>>();
   for (const signature of signatures) {
     kinds.set(signature.kind, (kinds.get(signature.kind) ?? 0) + 1);
-    const cueIds = cues.get(signature.cue) ?? new Set<string>();
-    cueIds.add(signature.reviewId);
-    cues.set(signature.cue, cueIds);
+    const mechanism = `${signature.kind}|${signature.relatedKinds.slice().sort().join("+")}`;
+    const mechanismIds = mechanisms.get(mechanism) ?? new Set<string>();
+    mechanismIds.add(signature.reviewId);
+    mechanisms.set(mechanism, mechanismIds);
     for (const context of signature.context) {
       const ids = contexts.get(context) ?? new Set<string>();
       ids.add(signature.reviewId);
@@ -74,12 +75,12 @@ function dominantSignature(signatures: ComplaintSignature[]): { kind: ComplaintS
     .sort((a, b) => b[1].size - a[1].size)
     .slice(0, 4)
     .map(([context]) => context);
-  const dominantCues = [...cues]
+  const dominantMechanisms = [...mechanisms]
     .filter(([, ids]) => ids.size >= Math.max(2, Math.ceil(signatures.length * 0.18)))
     .sort((a, b) => b[1].size - a[1].size)
     .slice(0, 3)
-    .map(([cue]) => cue);
-  return dominantContexts.length > 0 && dominantCues.length > 0 ? { kind, contexts: dominantContexts, cues: dominantCues } : null;
+    .map(([mechanism]) => mechanism);
+  return dominantContexts.length > 0 && dominantMechanisms.length > 0 ? { kind, contexts: dominantContexts, mechanisms: dominantMechanisms } : null;
 }
 
 function supportsCentroid(signatures: ComplaintSignature[], centroid: NonNullable<ReturnType<typeof dominantSignature>>): boolean {
@@ -267,7 +268,7 @@ export function evaluate(reviews: Review[], analysis: Analysis): Evaluation {
       if (!right) continue;
       const rightCentroid = centroids.get(right.id);
       if (!rightCentroid || leftCentroid.kind !== rightCentroid.kind) continue;
-      const sameMechanism = setSimilarity(leftCentroid.cues, rightCentroid.cues) > 0;
+      const sameMechanism = setSimilarity(leftCentroid.mechanisms, rightCentroid.mechanisms) > 0;
       const contextSimilarity = setSimilarity(leftCentroid.contexts, rightCentroid.contexts);
       const overlap = evidenceOverlap(left.reviewIds, right.reviewIds);
       if (!sameMechanism || (contextSimilarity < 0.5 && overlap < 0.42)) continue;
