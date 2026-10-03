@@ -32,11 +32,11 @@ export const FUNCTION_WORDS = new Set([
 ]);
 
 export const GENERIC_CONTEXT = new Set([
-  "anything","app","application","brand","business","company","customer","customers","day","days","everything","experience","hour","hours","minute","minutes","month","months","nothing","one","overall","platform","product","products","service","services","something","system","thing","things","time","times","use","user","users","way","week","weeks","whole",
+  "anything","app","application","brand","business","company","customer","customers","day","days","everything","experience","hour","hours","issue","issues","minute","minutes","month","months","nothing","one","overall","platform","problem","problems","product","products","quality","service","services","something","stuff","system","thing","things","time","times","use","user","users","way","week","weeks","whole",
 ]);
 
 const CONTEXT_NOISE = new Set([
-  "after","around","becom","become","became","before","confirm","continue","dur","during","finally","final","find","found","go","going","keep","keeps","longer","make","made","next","open","reopen","save","saved","see","seen","show","shows","start","started","step","try","tried","when","work","working",
+  "after","around","becom","become","became","before","confirm","continue","dur","during","finally","final","find","found","go","going","keep","keeps","longer","make","made","next","open","really","reopen","save","saved","see","seen","show","shows","start","started","step","try","tried","when","work","working",
 ]);
 
 const CUES: Record<ProblemKind, Set<string>> = {
@@ -159,10 +159,17 @@ export function setSimilarity(left: Iterable<string>, right: Iterable<string>): 
 
 export function signatureCompatibility(a: ComplaintSignature, b: ComplaintSignature): number {
   const sameKind = a.kind === b.kind ? 1 : 0;
+  const sameMechanism = a.cue === b.cue ? 1 : 0;
   const context = setSimilarity(a.context, b.context);
   const details = setSimilarity([...a.details, ...a.consequence], [...b.details, ...b.consequence]);
-  if (!sameKind || context === 0) return 0;
-  return 0.62 + context * 0.28 + details * 0.1;
+  if (!sameKind || !sameMechanism || context === 0) return 0;
+  return 0.62 + context * 0.25 + details * 0.13;
+}
+
+/** A quality cue alone is sentiment, not a concrete failure proposition. */
+export function isConcreteComplaint(signature: ComplaintSignature): boolean {
+  if (signature.kind !== "quality") return true;
+  return signature.consequence.length > 0 || signature.details.length >= 2;
 }
 
 export function describesProblem(label: string): boolean {

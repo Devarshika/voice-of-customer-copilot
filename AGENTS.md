@@ -8,3 +8,5 @@
 > Commits you push to the connected branch sync back to Lovable and show up in
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
+
+- Keep Voice of Customer analysis deterministic and dataset-agnostic; cluster and evaluate final evidence propositions rather than domain vocabulary or generated labels, because uploaded datasets can cover unrelated products.
