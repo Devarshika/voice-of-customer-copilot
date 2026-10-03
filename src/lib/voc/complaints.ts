@@ -20,6 +20,8 @@ export type ComplaintSignature = {
   context: string[];
   details: string[];
   consequence: string[];
+  /** Other failure kinds expressed in the same sentence; separates compound mechanisms. */
+  relatedKinds: ProblemKind[];
   severity: boolean;
   completeness: number;
 };
@@ -110,6 +112,7 @@ export function extractComplaintSignatures(review: Review, corpusCommon: Set<str
   for (const sentence of sentences) {
     const raw = sentence.toLowerCase().match(WORDS) ?? [];
     const stems = raw.map(normalizeWord);
+    const sentenceKinds = [...new Set(stems.map(cueKind).filter((kind): kind is ProblemKind => kind !== null))];
     for (let cueIndex = 0; cueIndex < stems.length; cueIndex += 1) {
       let cue = stems[cueIndex] ?? "";
       let kind = cueKind(cue);
@@ -136,6 +139,7 @@ export function extractComplaintSignatures(review: Review, corpusCommon: Set<str
         context,
         details,
         consequence,
+        relatedKinds: sentenceKinds.filter((related) => related !== kind),
         severity: stems.some((word) => SEVERE.has(word)),
         completeness: Math.min(1, 0.45 + (context.length >= 1 ? 0.25 : 0) + (details.length > 0 ? 0.15 : 0) + (consequence.length > 0 ? 0.15 : 0)),
       };
@@ -159,7 +163,7 @@ export function setSimilarity(left: Iterable<string>, right: Iterable<string>): 
 
 export function signatureCompatibility(a: ComplaintSignature, b: ComplaintSignature): number {
   const sameKind = a.kind === b.kind ? 1 : 0;
-  const sameMechanism = a.cue === b.cue ? 1 : 0;
+  const sameMechanism = a.kind === b.kind && setSimilarity(a.relatedKinds, b.relatedKinds) === (a.relatedKinds.length || b.relatedKinds.length ? 1 : 0) ? 1 : 0;
   const context = setSimilarity(a.context, b.context);
   const details = setSimilarity([...a.details, ...a.consequence], [...b.details, ...b.consequence]);
   if (!sameKind || !sameMechanism || context === 0) return 0;

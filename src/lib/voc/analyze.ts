@@ -163,9 +163,10 @@ function groupSimilarity(left: SignatureGroup, right: SignatureGroup): number {
   if (left.kind !== right.kind) return 0;
   const context = setSimilarity(left.contexts.keys(), right.contexts.keys());
   const overlap = evidenceOverlap(left.reviewIds, right.reviewIds);
-  const leftCues = new Set(left.signatures.map((signature) => signature.cue));
-  const rightCues = new Set(right.signatures.map((signature) => signature.cue));
-  const mechanism = setSimilarity(leftCues, rightCues);
+  const leftQualifiers = new Set(left.signatures.flatMap((signature) => signature.relatedKinds));
+  const rightQualifiers = new Set(right.signatures.flatMap((signature) => signature.relatedKinds));
+  const sameQualifier = leftQualifiers.size === rightQualifiers.size && [...leftQualifiers].every((kind) => rightQualifiers.has(kind));
+  const mechanism = sameQualifier ? 1 : 0;
   if (mechanism === 0) return 0;
   if (overlap >= 0.5) return 0.9;
   const leftPrimary = [...left.contexts].sort((a, b) => b[1] - a[1])[0]?.[0];
@@ -175,7 +176,7 @@ function groupSimilarity(left: SignatureGroup, right: SignatureGroup): number {
   const rightTop = right.signatures.slice(0, 20);
   let bestSignature = 0;
   for (const a of leftTop) for (const b of rightTop) bestSignature = Math.max(bestSignature, signatureCompatibility(a, b));
-  if (context === 0 && overlap < 0.22) return 0;
+  if (context === 0 && overlap < 0.22) return mechanism === 1 ? 0.52 : 0;
   return mechanism * 0.28 + context * 0.34 + overlap * 0.25 + bestSignature * 0.13;
 }
 
@@ -218,9 +219,10 @@ function mergeBestFirst(seedGroups: SignatureGroup[]): SignatureGroup[] {
 function mechanismPurity(group: SignatureGroup): number {
   const cues = new Map<string, Set<string>>();
   for (const signature of group.signatures) {
-    const ids = cues.get(signature.cue) ?? new Set<string>();
+    const mechanism = `${signature.kind}|${signature.relatedKinds.slice().sort().join("+")}`;
+    const ids = cues.get(mechanism) ?? new Set<string>();
     ids.add(signature.reviewId);
-    cues.set(signature.cue, ids);
+    cues.set(mechanism, ids);
   }
   const dominant = Math.max(0, ...[...cues.values()].map((ids) => ids.size));
   return group.reviewIds.size ? dominant / group.reviewIds.size : 0;
@@ -259,7 +261,7 @@ function discoverThemes(reviews: Review[], minEvidence: number): Theme[] {
       if (isLikelyNamedEntity(mainContextStem, representativeSentences)) return null;
       const context = surfaceWord(mainContextStem, representativeSentences);
       const label = titleCase(`${context} ${problemKindLabel(group.kind)}`);
-      const cohesion = clusterCohesion(group);
+      const cohesion = Math.max(clusterCohesion(group), mechanismPurity(group));
       const mechanism = mechanismPurity(group);
       const concrete = concretePropositionShare(group);
       const completeness = group.signatures.reduce((sum, signature) => sum + signature.completeness, 0) / group.signatures.length;
@@ -290,7 +292,7 @@ function discoverThemes(reviews: Review[], minEvidence: number): Theme[] {
         if (prior.kind !== theme.kind) return false;
         const contextSimilarity = setSimilarity(prior.contexts.slice(0, 3), theme.contexts.slice(0, 3));
         const overlap = evidenceOverlap(new Set(prior.reviewIds), new Set(theme.reviewIds));
-        const sharedMechanism = prior.signatures.some((left) => theme.signatures.some((right) => left.cue === right.cue));
+        const sharedMechanism = prior.kind === theme.kind && prior.signatures.some((left) => theme.signatures.some((right) => setSimilarity(left.relatedKinds, right.relatedKinds) === (left.relatedKinds.length || right.relatedKinds.length ? 1 : 0)));
         return sharedMechanism && (prior.label.toLowerCase() === theme.label.toLowerCase() || contextSimilarity >= 0.5 || overlap >= 0.42);
       });
     })
