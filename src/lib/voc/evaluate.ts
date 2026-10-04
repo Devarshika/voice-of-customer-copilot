@@ -89,7 +89,10 @@ function supportsCentroid(signatures: ComplaintSignature[], centroid: NonNullabl
     if (signature.kind !== centroid.kind) return false;
     return centroid.mechanisms.some((candidate) => {
       const related = candidate.split("|")[1]?.split("+").filter(Boolean) ?? [];
-      return mechanism === candidate || (signature.relatedKinds.length > 0 && related.some((kind) => signature.relatedKinds.includes(kind as ComplaintSignature["kind"])));
+      return mechanism === candidate
+        || signature.relatedKinds.length === 0
+        || related.length === 0
+        || related.some((kind) => signature.relatedKinds.includes(kind as ComplaintSignature["kind"]));
     });
   });
 }

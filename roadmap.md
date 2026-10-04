@@ -7,3 +7,4 @@
 - [x] Replace circular evaluation checks with proposition, specificity, and opportunity checks
 - [x] Add and run multi-domain quality fixtures
 - [x] Verify the current dataset, dashboard interactions, AI Evaluation, build, and runtime
+- [x] Strengthen semantic deduplication, vague-problem rejection, opportunity distinctness, and their evaluation checks
