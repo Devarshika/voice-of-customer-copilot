@@ -242,7 +242,16 @@ function clusterCohesion(group: SignatureGroup): number {
 
 function discoverThemes(reviews: Review[], minEvidence: number): Theme[] {
   const common = corpusCommonTerms(reviews);
-  const signatures = reviews.flatMap((review) => extractComplaintSignatures(review, common));
+  const extracted = reviews.flatMap((review) => extractComplaintSignatures(review, common));
+  const signatures = extracted.filter((signature) => {
+    const specificity = signature.context.length + signature.details.length + signature.consequence.length;
+    return !extracted.some((candidate) =>
+      candidate.reviewId === signature.reviewId
+      && candidate.sentence === signature.sentence
+      && candidate.kind !== signature.kind
+      && candidate.context.length + candidate.details.length + candidate.consequence.length > specificity,
+    );
+  });
   const groups = mergeBestFirst(buildSeedGroups(signatures, minEvidence));
 
   return groups
