@@ -83,6 +83,7 @@ Prioritization
 Potential Product Opportunities
        ↓
 PM Investigation & Decision
+```
 
 ---
 
@@ -238,3 +239,4 @@ Trends   Churn     Prioritization
 Potential Product Opportunities
           ↓
 PM Investigation & Decision
+```
