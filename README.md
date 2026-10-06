@@ -14,15 +14,15 @@ The product is dataset-agnostic and supports uploading additional customer-feedb
 
 ## 🎯 Problem
 
-Product Managers often have access to thousands of customer reviews, support messages, and other feedback sources, but turning that unstructured feedback into reliable product insights is difficult.
+Product Managers often have access to thousands of customer reviews and other feedback, but turning that unstructured feedback into reliable product insights is difficult.
 
 Simply asking an LLM to summarize reviews can produce:
 
-- vague problem statements
-- duplicate themes
-- unsupported conclusions
-- poor prioritization
-- recommendations that are not grounded in customer evidence
+- Vague problem statements
+- Duplicate themes
+- Unsupported conclusions
+- Poor prioritization
+- Recommendations that are not grounded in customer evidence
 
 Voice of Customer Copilot is designed to help PMs move from:
 
