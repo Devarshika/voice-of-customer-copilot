@@ -1,80 +1,85 @@
-# Voice Insights Dashboard
+# Voice of Customer Copilot
 
-Build a web application called "Voice of Customer Copilot".
+AI-powered product research and decision-support tool that helps Product Managers turn large volumes of unstructured customer feedback into evidence-backed product insights.
 
-It is an AI-powered product management tool that helps Product Managers turn large volumes of customer reviews into evidence-backed product insights.
+## 🚀 Live Demo
 
-The core product experience must be a desktop-first two-panel dashboard:
+[Try Voice of Customer Copilot](https://voice-of-customer-copilot.lovable.app)
 
-LEFT PANEL:
+The live demo includes **49,998 real Uber app customer reviews** as the default dataset.
 
-"Customer Voice"
+The product is dataset-agnostic and supports uploading additional customer-feedback datasets.
 
-- Show actual customer reviews
+---
 
-- Search and filter reviews
+## 🎯 Problem
 
-- Scrollable review feed
+Product Managers often have access to thousands of customer reviews, support messages, and other feedback sources, but turning that unstructured feedback into reliable product insights is difficult.
 
-- Each review should display available metadata such as date, rating, source, etc.
+Simply asking an LLM to summarize reviews can produce:
 
-- Never fabricate missing review metadata
+- vague problem statements
+- duplicate themes
+- unsupported conclusions
+- poor prioritization
+- recommendations that are not grounded in customer evidence
 
-RIGHT PANEL:
+Voice of Customer Copilot is designed to help PMs move from:
 
-"AI Insights"
+**Customer Feedback → Evidence → Problems → Patterns → Priorities → Product Opportunities**
 
-- Overview KPI cards
+---
 
-- Top Pain Points
+## 💡 What It Does
 
-- Emerging Trends
+Voice of Customer Copilot helps Product Managers:
 
-- Potential Churn Signals
+- Identify recurring customer pain points
+- Cluster related feedback into problem themes
+- Trace insights back to supporting customer reviews
+- Detect emerging trends
+- Surface potential churn signals
+- Prioritize problems using evidence-based signals
+- Generate potential product opportunities
+- Evaluate the quality and evidence-grounding of AI-generated insights
 
-- AI-assisted Prioritization
+---
 
-- Potential Product Opportunities
+## 🔍 Evidence-First Product Design
 
-The most important interaction is:
+A core design principle is **traceability**.
 
-AI insight → supporting customer reviews.
+Instead of showing a conclusion such as:
 
-When a PM clicks a pain point on the right, the left panel should filter to the actual reviews supporting that insight.
+> "Customers are frustrated with cancellations."
 
-When a PM clicks a review on the left, show which AI insights that review contributes to.
+the product allows a PM to select the insight and inspect the underlying customer reviews supporting it.
 
-The visual style should be modern, clean, professional B2B SaaS / AI product analytics. Avoid excessive gradients, excessive rounded cards, childish AI visuals, or generic chatbot styling.
+This creates a feedback loop between:
 
-The application should launch with a "Zomato Reviews" demo dataset selected by default.
+**AI Insight ↔ Customer Evidence**
 
-There should also be a "+ Add Dataset" button in the header for uploading additional datasets later.
+The goal is not to replace PM judgment, but to make AI-generated findings easier to investigate, verify, and challenge.
 
-Create the initial application structure and dashboard UI first. Do not use fake metrics or fake customer reviews. Use clearly marked placeholders only where real data has not yet been connected.
+---
 
-Do not build authentication, billing, team collaboration, notifications, or other non-essential enterprise features.
+## 🖥️ Product Workflow
 
-Focus on making the main dashboard feel like a serious PM decision-support product.
-
-This project was built with [Lovable](https://lovable.dev).
-
-**Live app**: https://voice-of-customer-copilot.lovable.app
-
-## Build with Lovable
-
-Continue developing this project in the [Lovable editor](https://lovable.dev/projects/9d8fb09f-cedf-4b39-ab03-b27fc016f4da).
-
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: every change made in Lovable is committed straight to this repository.
-- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
-
-## Development
-
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
-
-```sh
-git clone <this-repository-url>
-cd <repository-name>
-npm i
-npm run dev
-```
+```text
+Customer Reviews
+       ↓
+Feedback Analysis
+       ↓
+Pain Point Detection
+       ↓
+Problem Clustering
+       ↓
+Evidence Inspection
+       ↓
+Trend & Churn Signals
+       ↓
+Prioritization
+       ↓
+Potential Product Opportunities
+       ↓
+PM Investigation & Decision
